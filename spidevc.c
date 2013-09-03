@@ -88,12 +88,12 @@ int spi_reset(int a)
 int spi_txrx(const char *wrbuf, char *rdbuf, int bufsz)
 {
 	int fd;
-	int mode, bits, speed, rv, i, j;
+	int mode, bits, speed, rv, i, j, maxspeed;
 	struct timespec tv;
 	struct spi_ioc_transfer tr[16];
 
 	memset(&tr,0,sizeof(tr));
-	mode = 0; bits = 8; speed = 2000000;
+	mode = 0; bits = 8; speed = SPI_SPEED, maxspeed=SPI_MAX_SPEED;
 
 	spi_reset(1234);
 	fd = open("/dev/spidev0.0", O_RDWR);
@@ -102,8 +102,8 @@ int spi_txrx(const char *wrbuf, char *rdbuf, int bufsz)
         if (ioctl(fd, SPI_IOC_RD_MODE, &mode) < 0) { perror("Unable to set RD MODE"); close(fd); return -1; }
         if (ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits) < 0) { perror("Unable to set WR_BITS_PER_WORD"); close(fd); return -1; }
         if (ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &bits) < 0) { perror("Unable to set RD_BITS_PER_WORD"); close(fd); return -1; }
-        if (ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed) < 0) { perror("Unable to set WR_MAX_SPEED_HZ"); close(fd); return -1; }
-        if (ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed) < 0) { perror("Unable to set RD_MAX_SPEED_HZ"); close(fd); return -1; }
+        if (ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &maxspeed) < 0) { perror("Unable to set WR_MAX_SPEED_HZ"); close(fd); return -1; }
+        if (ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &maxspeed) < 0) { perror("Unable to set RD_MAX_SPEED_HZ"); close(fd); return -1; }
 
 	rv = 0;
 	while (bufsz >= 4096) {
@@ -195,4 +195,26 @@ void spi_emit_data(unsigned addr, const char *buf, unsigned len)
 	otmp[1] = (addr >> 8)&0xFF; otmp[2] = addr & 0xFF;
 	spi_emit_buf(otmp, 3);
 	spi_emit_buf_reverse(buf, len*4);
+}
+
+/*
+	Turns on bank. Other banks are turned off.
+*/
+void mboardv2_select_bank(int bank)
+{
+	const int banks[4]={18,23,24,25}; // GPIO connected to OE of level shifters
+	int i;
+	for(i=0;i<4;i++)
+	{
+		INP_GPIO(banks[i]);
+		OUT_GPIO(banks[i]);
+		if(i==bank)
+		{
+			GPIO_SET = 1 << banks[i]; // enable bank
+		} 
+		else
+		{
+			GPIO_CLR = 1 << banks[i];// disable bank
+		}
+	}
 }

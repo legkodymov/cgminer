@@ -41,6 +41,9 @@
 
 #define BITFURY_REFRESH_DELAY 100
 #define BITFURY_DETECT_TRIES 3000 / BITFURY_REFRESH_DELAY
+#define BITFURY_BOARD_TYPE_I2C 0
+#define BITFURY_BOARD_TYPE_MBOARDV1 1
+#define BITFURY_BOARD_TYPE_MBOARDV2 2
 
 // 0 .... 31 bit
 // 1000 0011 0101 0110 1001 1010 1100 0111
@@ -174,6 +177,22 @@ void ms3_compute(unsigned *p)
 	p[15] = a; p[14] = b; p[13] = c; p[12] = d; p[11] = e; p[10] = f; p[9] = g; p[8] = h;
 }
 
+void select_slot(int slot)
+{
+	if (opt_bitfury_board_type == BITFURY_BOARD_TYPE_I2C)
+		tm_i2c_set_oe(slot);
+	else if (opt_bitfury_board_type == BITFURY_BOARD_TYPE_MBOARDV2)
+	{
+		mboardv2_select_bank(slot);
+	}
+		
+}
+void deselect_slot(int slot)
+{
+	if (opt_bitfury_board_type == BITFURY_BOARD_TYPE_I2C)
+		tm_i2c_clear_oe(slot);
+}
+
 void send_conf() {
 	config_reg(7,0); config_reg(8,0); config_reg(9,0); config_reg(10,0); config_reg(11,0);
 	config_reg(6,0); /* disable OUTSLK */
@@ -220,9 +239,9 @@ void send_reinit(int slot, int chip_n, int n) {
 	set_freq(n);
 	send_conf();
 	send_init();
-	tm_i2c_set_oe(slot);
+	select_slot(slot);
 	spi_txrx(spi_gettxbuf(), spi_getrxbuf(), spi_getbufsz());
-	tm_i2c_clear_oe(slot);
+	deselect_slot(slot);
 }
 
 void send_shutdown(int slot, int chip_n) {
@@ -230,9 +249,9 @@ void send_shutdown(int slot, int chip_n) {
 	spi_emit_break();
 	spi_emit_fasync(chip_n);
 	config_reg(4,0); /* Disable slow oscillator */
-	tm_i2c_set_oe(slot);
+	select_slot(slot);
 	spi_txrx(spi_gettxbuf(), spi_getrxbuf(), spi_getbufsz());
-	tm_i2c_clear_oe(slot);
+	deselect_slot(slot);
 }
 
 void send_freq(int slot, int chip_n, int bits) {
@@ -240,9 +259,9 @@ void send_freq(int slot, int chip_n, int bits) {
 	spi_emit_break();
 	spi_emit_fasync(chip_n);
 	set_freq(bits);
-	tm_i2c_set_oe(slot);
+	select_slot(slot);
 	spi_txrx(spi_gettxbuf(), spi_getrxbuf(), spi_getbufsz());
-	tm_i2c_clear_oe(slot);
+	deselect_slot(slot);
 }
 
 unsigned int c_diff(unsigned ocounter, unsigned counter) {
@@ -328,28 +347,44 @@ int libbitfury_detectChips(struct bitfury_device *devices) {
 	int i;
 	static slot_on[32];
 	struct timespec t1, t2;
-
-	if (tm_i2c_init() < 0) {
-		printf("I2C init error\n");
-		return(1);
-	}
-
+	
 	for (i = 0; i < 32; i++) {
 		slot_on[i] = 0;
 	}
-	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t1);
-	for (i = 0; i < 32; i++) {
-		int slot_detected = tm_i2c_detect(i) != -1;
-		slot_on[i] = slot_detected;
-		tm_i2c_clear_oe(i);
-		nmsleep(1);
-	}
 
+	if (opt_bitfury_board_type == BITFURY_BOARD_TYPE_I2C) {
+		if (tm_i2c_init() < 0) {
+			printf("I2C init error\n");
+			return(1);
+		}
+		clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t1);
+		for (i = 0; i < 32; i++) {
+			int slot_detected = tm_i2c_detect(i) != -1;
+			slot_on[i] = slot_detected;
+			deselect_slot(i);
+			nmsleep(1);
+		}
+	}
+	else if (opt_bitfury_board_type == BITFURY_BOARD_TYPE_MBOARDV1) {
+		applog(LOG_WARNING, "MBoard V1 not implemented");
+
+		//slot_on[0] = 1;
+	}
+	else if (opt_bitfury_board_type == BITFURY_BOARD_TYPE_MBOARDV2) {
+		spi_init();
+		for (i=0; i < 4;i++)
+		{
+			select_slot(i);
+			spi_reset(1234); //what is this 1234?
+			slot_on[i]=1;
+		}
+			
+	}
 	for (i = 0; i < 32; i++) {
 		if (slot_on[i]) {
 			int chip_n = 0;
 			int chip_detected;
-			tm_i2c_set_oe(i);
+			select_slot(i);
 			do {
 				chip_detected = detect_chip(chip_n);
 				if (chip_detected) {
@@ -360,7 +395,8 @@ int libbitfury_detectChips(struct bitfury_device *devices) {
 					chip_n++;
 				}
 			} while (chip_detected);
-			tm_i2c_clear_oe(i);
+			deselect_slot(i);
+			applog(LOG_WARNING, "BITFURY slot: %d, %d chips", i, chip_n);
 		}
 	}
 
@@ -494,11 +530,11 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 			if (smart) {
 				config_reg(3,0);
 			}
-			tm_i2c_set_oe(slot);
+			select_slot(slot);
 			clock_gettime(CLOCK_REALTIME, &(time));
 			d_time = t_diff(time, d->predict1);
 			spi_txrx(spi_gettxbuf(), spi_getrxbuf(), spi_getbufsz());
-			tm_i2c_clear_oe(slot);
+			deselect_slot(slot);
 			memcpy(newbuf, spi_getrxbuf()+4 + chip, 17*4);
 
 			d->job_switched = newbuf[16] != oldbuf[16];
@@ -668,9 +704,9 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 				if (smart) {
 					config_reg(3,1);
 				}
-				tm_i2c_set_oe(slot);
+				select_slot(slot);
 				spi_txrx(spi_gettxbuf(), spi_getrxbuf(), spi_getbufsz());
-				tm_i2c_clear_oe(slot);
+				deselect_slot(slot);
 				memcpy(newbuf, spi_getrxbuf()+4 + chip, 17*4);
 				d->counter2 = get_counter(newbuf, oldbuf);
 

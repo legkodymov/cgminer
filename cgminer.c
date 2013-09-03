@@ -163,6 +163,10 @@ bool opt_bfl_noncerange;
 #endif
 #define QUIET	(opt_quiet || opt_realquiet)
 
+#if defined(USE_BITFURY)
+int opt_bitfury_board_type=0;
+#endif
+
 struct thr_info *control_thr;
 struct thr_info **mining_thr;
 static int gwsched_thr_id;
@@ -953,6 +957,11 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--bfl-range",
 			opt_set_bool, &opt_bfl_noncerange,
 			"Use nonce range on bitforce devices if supported"),
+#endif
+#if defined(USE_BITFURY)
+	OPT_WITH_ARG("--bitfury-board-type",
+			set_int_1_to_10, opt_show_intval, &opt_bitfury_board_type,
+			"Bitfury board type, 0=i2c, 1=mboardv1, 2=mboardv2"),
 #endif
 #ifdef HAVE_CURSES
 	OPT_WITHOUT_ARG("--compact",

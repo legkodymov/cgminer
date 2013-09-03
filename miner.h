@@ -881,6 +881,9 @@ extern cgsem_t usb_resource_sem;
 #ifdef USE_BITFORCE
 extern bool opt_bfl_noncerange;
 #endif
+#ifdef USE_BITFURY
+extern int opt_bitfury_board_type;
+#endif
 extern int swork_id;
 
 extern pthread_rwlock_t netacc_lock;
