@@ -50,6 +50,6 @@ void spi_emit_data(unsigned addr, const char *buf, unsigned len);
 void mboardv2_select_bank(int bank);
 
 #define SPI_MAX_SPEED 1000000
-#define SPI_SPEED 800000
+#define SPI_SPEED 400000
 
 #endif
