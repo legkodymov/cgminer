@@ -183,7 +183,10 @@ void select_slot(int slot)
 		tm_i2c_set_oe(slot);
 	else if (opt_bitfury_board_type == BITFURY_BOARD_TYPE_MBOARDV2)
 	{
-		mboardv2_select_bank(slot);
+		static int lastslot = -1;
+		if(lastslot != slot)
+			mboardv2_select_bank(slot);
+		lastslot = slot;
 	}
 		
 }
