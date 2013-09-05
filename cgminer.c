@@ -165,6 +165,7 @@ bool opt_bfl_noncerange;
 
 #if defined(USE_BITFURY)
 int opt_bitfury_board_type=0;
+unsigned char opt_bitfury_chip_speed=54;
 #endif
 
 struct thr_info *control_thr;
@@ -571,6 +572,12 @@ static char *set_int_0_to_10(const char *arg, int *i)
 {
 	return set_int_range(arg, i, 0, 10);
 }
+#ifdef USE_BITFURY
+static char *set_int_52_to_57(const char *arg, int *i)
+{
+	return set_int_range(arg, i, 52, 57);
+}
+#endif
 
 #ifdef USE_AVALON
 static char *set_int_0_to_100(const char *arg, int *i)
@@ -962,6 +969,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_ARG("--bitfury-board-type",
 			set_int_1_to_10, opt_show_intval, &opt_bitfury_board_type,
 			"Bitfury board type, 0=i2c, 1=mboardv1, 2=mboardv2"),
+	OPT_WITH_ARG("--bitfury-chip-speed",
+			set_int_52_to_57, opt_show_intval, &opt_bitfury_chip_speed,
+			"Bitfury chip speed (52 - 57)"),
 #endif
 #ifdef HAVE_CURSES
 	OPT_WITHOUT_ARG("--compact",
