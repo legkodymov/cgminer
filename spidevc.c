@@ -55,6 +55,7 @@ void spi_init(void)
 #define GPIO_SET *(gpio+7)  // sets   bits which are 1 ignores bits which are 0
 #define GPIO_CLR *(gpio+10) // clears bits which are 1 ignores bits which are 0
 
+#define RESET_TOGGLES 8
 // Bit-banging reset, to reset more chips in chain - toggle for longer period... Each 3 reset cycles reset first chip in chain
 int spi_reset(int a)
 {
@@ -63,7 +64,7 @@ int spi_reset(int a)
 	INP_GPIO(10); OUT_GPIO(10);
 	INP_GPIO(11); OUT_GPIO(11);
 	GPIO_SET = 1 << 11; // Set SCK
-	for (i = 0; i < 32; i++) { // On standard settings this unoptimized code produces 1 Mhz freq.
+	for (i = 0; i < RESET_TOGGLES; i++) { // On standard settings this unoptimized code produces 1 Mhz freq.
 		GPIO_SET = 1 << 10;
 		for (j = 0; j < len; j++) {
 			a *= a;
