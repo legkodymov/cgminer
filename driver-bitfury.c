@@ -136,16 +136,32 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 					//submit_nonce(thr, owork, bswap_32(res[j]));
 				}
 			}
-			devices[chip].results_n = 0;
-			devices[chip].job_switched = 0;
 			if (devices[chip].old_nonce && o2work) {
+				int dup = 0;
+				for (j=0; j<devices[chip].results_n;j++) {
+					if(devices[chip].old_nonce == res[j])
+						dup = 1;
+				}
+				if (!dup)
+				{
 					submit_nonce(thr, o2work, bswap_32(devices[chip].old_nonce));
 					i++;
+				}
 			}
 			if (devices[chip].future_nonce) {
+				int dup = 0;
+				for (j=0; j<devices[chip].results_n;j++) {
+					if(devices[chip].future_nonce == res[j])
+						dup = 1;
+				}
+				if (!dup)
+				{
 					submit_nonce(thr, work, bswap_32(devices[chip].future_nonce));
 					i++;
+				}
 			}
+			devices[chip].results_n = 0;
+			devices[chip].job_switched = 0;
 
 			if (o2work)
 				work_completed(thr->cgpu, o2work);
