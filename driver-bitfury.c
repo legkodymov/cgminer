@@ -139,7 +139,7 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 			if (devices[chip].old_nonce && o2work) {
 				int dup = 0;
 				for (j=0; j<devices[chip].results_n;j++) {
-					if(devices[chip].old_nonce == res[j])
+					if(devices[chip].old_nonce == res[j] && owork)
 						dup = 1;
 				}
 				if (!dup)
@@ -151,7 +151,7 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 			if (devices[chip].future_nonce) {
 				int dup = 0;
 				for (j=0; j<devices[chip].results_n;j++) {
-					if(devices[chip].future_nonce == res[j])
+					if(devices[chip].future_nonce == res[j] && owork)
 						dup = 1;
 				}
 				if (!dup)
