@@ -172,7 +172,7 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 			hashes += 0xffffffffull * i;
 		}
 	}
-
+/*
 	if (now.tv_sec - short_out_t > short_stat) {
 		int shares_first = 0, shares_last = 0, shares_total = 0;
 		char stat_lines[32][256] = {0};
@@ -259,7 +259,7 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 			}
 		long_out_t = now.tv_sec;
 	}
-
+*/
 	return hashes;
 }
 
