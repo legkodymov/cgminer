@@ -177,17 +177,24 @@ void ms3_compute(unsigned *p)
 	p[15] = a; p[14] = b; p[13] = c; p[12] = d; p[11] = e; p[10] = f; p[9] = g; p[8] = h;
 }
 
-void select_slot(int slot)
+int select_slot(int slot)
 {
-	if (opt_bitfury_board_type == BITFURY_BOARD_TYPE_I2C)
+	int slot_changed = 0;
+	if (opt_bitfury_board_type == BITFURY_BOARD_TYPE_I2C){
 		tm_i2c_set_oe(slot);
+		slot_changed = 1;
+	}
+		
 	else if (opt_bitfury_board_type == BITFURY_BOARD_TYPE_MBOARDV2)
 	{
 		static int lastslot = -1;
-		if(lastslot != slot)
+		if(lastslot != slot) {
 			mboardv2_select_bank(slot);
+			slot_changed = 1;
+		}
 		lastslot = slot;
 	}
+	return slot_changed;
 		
 }
 void deselect_slot(int slot)
@@ -507,6 +514,8 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 	int buf_diff;
 	static unsigned second_run;
 	
+	static int init_this_chip = 0;
+	
 	for (chip_id = 0; chip_id < chip_n; chip_id++) {
 		unsigned char *hexstr;
 		struct bitfury_device *d = bf + chip_id;
@@ -517,241 +526,115 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 		struct bitfury_payload *o2p = &(d->o2payload);
 		struct timespec d_time;
 		struct timespec time;
-		int smart = 0;
-		int i;
+
 		int chip = d->fasync;
 		int slot = d->slot;
 
 		memcpy(atrvec, p, 20*4);
 		ms3_compute(atrvec);
 
-		clock_gettime(CLOCK_REALTIME, &(time));
 
-		if (!second_run) {
-			d->predict2 = d->predict1 = time;
-			d->counter1 = d->counter2 = 0;
-			d->req2_done = 0;
-		};
+		/* Programming next value */
+		select_slot(slot);
+		spi_clear_buf();
+		
+		spi_emit_break();
+		spi_emit_fasync(chip);
+		
+		if(init_this_chip == chip_id)
+		{
+			set_freq(d->osc6_bits);
+			send_conf();
+			send_init();
+		}
+		
+		spi_emit_data(0x3000, (void*)&atrvec[0], 19*4);
 
-		d_time = t_diff(time, d->predict1);
-		if (d_time.tv_sec < 0 && (d->req2_done || !smart)) {
-			d->otimer1 = d->timer1;
-			d->timer1 = time;
-			d->ocounter1 = d->counter1;
-			/* Programming next value */
-			select_slot(slot);
-			spi_clear_buf(); spi_emit_break();
-			spi_emit_fasync(chip);
-			spi_emit_data(0x3000, (void*)&atrvec[0], 19*4);
-			if (smart) {
-				config_reg(3,0);
-			}
-			clock_gettime(CLOCK_REALTIME, &(time));
-			d_time = t_diff(time, d->predict1);
-			spi_txrx(spi_gettxbuf(), spi_getrxbuf(), spi_getbufsz());
-			memcpy(newbuf, spi_getrxbuf()+4 + chip, 17*4);
-			d->counter1 = get_counter(newbuf, oldbuf);
-			buf_diff = get_diff(newbuf, oldbuf);
-			if (buf_diff > 4 || (d->counter1 > 0 && d->counter1 < 0x00400000 / 2)) {
-				if (buf_diff > 4) {
-//					printf("AAA        chip_id: %d, buf_diff: %d, counter: %08x\n", chip_id, buf_diff, d->counter1);
-					memcpy(atrvec, p, 20*4);
-					ms3_compute(atrvec);
-					spi_clear_buf(); spi_emit_break();
-					spi_emit_fasync(chip);
-					spi_emit_data(0x3000, (void*)&atrvec[0], 19*4);
-					clock_gettime(CLOCK_REALTIME, &(time));
-					d_time = t_diff(time, d->predict1);
-					spi_txrx(spi_gettxbuf(), spi_getrxbuf(), spi_getbufsz());
-					memcpy(newbuf, spi_getrxbuf()+4 + chip, 17*4);
-					buf_diff = get_diff(newbuf, oldbuf);
-					d->counter1 = get_counter(newbuf, oldbuf);
-//					printf("AAA _222__ chip_id: %d, buf_diff: %d, counter: %08x\n", chip_id, buf_diff, d->counter1);
-				}
-			}
+		spi_txrx(spi_gettxbuf(), spi_getrxbuf(), spi_getbufsz());
+		memcpy(newbuf, spi_getrxbuf()+4 + chip, 17*4);
 
-			deselect_slot(slot);
+		deselect_slot(slot);
 
-			d->job_switched = newbuf[16] != oldbuf[16];
+		d->job_switched = newbuf[16] != oldbuf[16];
 
-			int i;
-			int results_num = 0;
-			int found = 0;
-			unsigned * results = d->results;
+		int i;
+		int results_num = 0;
+		int found = 0;
+		unsigned * results = d->results;
 
-			d->old_nonce = 0;
-			d->future_nonce = 0;
-			for (i = 0; i < 16; i++) {
-				if (oldbuf[i] != newbuf[i] && op && o2p) {
-					unsigned pn; //possible nonce
-					unsigned int s = 0; //TODO zero may be solution
-					unsigned int old_f = 0;
-					if ((newbuf[i] & 0xFF) == 0xE0)
-						continue;
-					pn = decnonce(newbuf[i]);
-					s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn) ? pn : 0;
-					s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn-0x00400000) ? pn - 0x00400000 : 0;
-					s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn-0x00800000) ? pn - 0x00800000 : 0;
-					s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x02800000) ? pn + 0x02800000 : 0;
-					s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x02C00000) ? pn + 0x02C00000 : 0;
-					s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x00400000) ? pn + 0x00400000 : 0;
-					if (s) {
-						int k;
-						int dup = 0;
-						for (k = 0; k < results_num; k++) {
-							if (results[k] == bswap_32(s)) {
-								dup = 1;
-							}
-						}
-						if (!dup) {
-							results[results_num++] = bswap_32(s);
-							found++;
+		for (i = 0; i < 16; i++) {
+			if (oldbuf[i] != newbuf[i] && op && o2p) {
+				unsigned pn; //possible nonce
+				unsigned int s = 0; //TODO zero may be solution
+				unsigned int old_f = 0;
+				if ((newbuf[i] & 0xFF) == 0xE0)
+					continue;
+				pn = decnonce(newbuf[i]);
+				s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn) ? pn : 0;
+				s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn-0x00400000) ? pn - 0x00400000 : 0;
+				s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn-0x00800000) ? pn - 0x00800000 : 0;
+				s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x02800000) ? pn + 0x02800000 : 0;
+				s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x02C00000) ? pn + 0x02C00000 : 0;
+				s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x00400000) ? pn + 0x00400000 : 0;
+				if (s) {
+					int k;
+					int dup = 0;
+					for (k = 0; k < results_num; k++) {
+						if (results[k] == bswap_32(s)) {
+							dup = 1;
 						}
 					}
-
-					s = 0;
-					pn = decnonce(newbuf[i]);
-					s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn) ? pn : 0;
-					s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn-0x400000) ? pn - 0x400000 : 0;
-					s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn-0x800000) ? pn - 0x800000 : 0;
-					s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x2800000)? pn + 0x2800000 : 0;
-					s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x2C00000)? pn + 0x2C00000 : 0;
-					s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x400000) ? pn + 0x400000 : 0;
-					if (s) {
-						d->old_nonce = bswap_32(s);
+					if (!dup) {
+						results[results_num++] = bswap_32(s);
 						found++;
 					}
+				}
 
-					s = 0;
-					pn = decnonce(newbuf[i]);
-					s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn) ? pn : 0;
-					s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn-0x400000) ? pn - 0x400000 : 0;
-					s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn-0x800000) ? pn - 0x800000 : 0;
-					s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x2800000)? pn + 0x2800000 : 0;
-					s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x2C00000)? pn + 0x2C00000 : 0;
-					s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x400000) ? pn + 0x400000 : 0;
-					if (s) {
-						d->future_nonce = bswap_32(s);
-						found++;
-					}
-					if (!found) {
-						//printf("AAA Strange: %08x, chip_id: %d\n", pn, chip_id);
-						d->strange_counter++;
-					}
+				s = 0;
+				pn = decnonce(newbuf[i]);
+				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn) ? pn : 0;
+				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn-0x400000) ? pn - 0x400000 : 0;
+				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn-0x800000) ? pn - 0x800000 : 0;
+				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x2800000)? pn + 0x2800000 : 0;
+				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x2C00000)? pn + 0x2C00000 : 0;
+				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x400000) ? pn + 0x400000 : 0;
+				if (s) {
+					d->old_results[d->old_results_n++] = bswap_32(s);
+					found++;
+				}
+
+				s = 0;
+				pn = decnonce(newbuf[i]);
+				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn) ? pn : 0;
+				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn-0x400000) ? pn - 0x400000 : 0;
+				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn-0x800000) ? pn - 0x800000 : 0;
+				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x2800000)? pn + 0x2800000 : 0;
+				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x2C00000)? pn + 0x2C00000 : 0;
+				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x400000) ? pn + 0x400000 : 0;
+				if (s) {
+					d->future_results[d->future_results_n++] = bswap_32(s);;
+					found++;
+				}
+				if (!found) {
+					//d->nonce_errors++;
 				}
 			}
-			d->results_n = results_num;
-
-			if (smart) {
-				d_time = t_diff(d->timer2, d->timer1);
-			} else {
-				d_time = t_diff(d->otimer1, d->timer1);
-			}
-			d->counter1 = get_counter(newbuf, oldbuf);
-			if (d->counter2 || !smart) {
-				int shift;
-				int cycles;
-				int req1_cycles;
-				long long unsigned int period;
-				double ns;
-				unsigned full_cycles, half_cycles;
-				double full_delay, half_delay;
-				long long unsigned delta;
-				struct timespec t_delta;
-				double mhz;
-				int ccase;
-
-				shift = 800000;
-				if (smart) {
-					cycles = d->counter1 < d->counter2 ? 0x00400000 - d->counter2 + d->counter1 : d->counter1 - d->counter2; // + 0x003FFFFF;
-				} else {
-					if (d->counter1 > (0x00400000 - shift * 2) && d->ocounter1 > (0x00400000 - shift)) {
-						cycles = 0x00400000 - d->ocounter1 + d->counter1; // + 0x003FFFFF;
-						ccase = 1;
-					} else {
-						cycles = d->counter1 > d->ocounter1 ? d->counter1 - d->ocounter1 : 0x00400000 - d->ocounter1 + d->counter1;
-						ccase = 2;
-					}
-				}
-				req1_cycles = 0x003FFFFF - d->counter1;
-				period = (long long unsigned int)d_time.tv_sec * 1000000000ULL + (long long unsigned int)d_time.tv_nsec;
-				ns = (double)period / (double)(cycles);
-				mhz = 1.0 / ns * 65.0 * 1000.0;
-
-				if (d->counter1 > 0 && d->counter1 < 0x001FFFFF) {
-					//printf("//AAA chip_id %2d: %llu ms, req1_cycles: %08u,  counter1: %08d, ocounter1: %08d, counter2: %08d, cycles: %08d, ns: %.2f, mhz: %.2f \n", chip_id, period / 1000000ULL, req1_cycles, d->counter1, d->ocounter1, d->counter2, cycles, ns, mhz);
-				}
-				if (ns > 2000.0 || ns < 20) {
-					//printf("AAA %d!Stupid ns chip_id %2d: %llu ms, req1_cycles: %08u,  counter1: %08d, ocounter1: %08d, counter2: %08d, cycles: %08d, ns: %.2f, mhz: %.2f \n", ccase, chip_id, period / 1000000ULL, req1_cycles, d->counter1, d->ocounter1, d->counter2, cycles, ns, mhz);
-					ns = 200.0;
-				} else {
-					d->ns = ns;
-					d->mhz = mhz;
-				}
-
-				if (smart) {
-					half_cycles = req1_cycles + shift;
-					full_cycles = 0x003FFFFF - 2 * shift;
-				} else {
-					half_cycles = 0;
-					full_cycles = req1_cycles > shift ? req1_cycles - shift : req1_cycles + 0x00400000 - shift;
-				}
-				half_delay = (double)half_cycles * ns * (1 +0.92);
-				full_delay = (double)full_cycles * ns;
-				delta = (long long unsigned)(full_delay + half_delay);
-				t_delta.tv_sec = delta / 1000000000ULL;
-				t_delta.tv_nsec = delta - t_delta.tv_sec * 1000000000ULL;
-				d->predict1 = t_add(time, t_delta);
-
-				if (smart) {
-					half_cycles = req1_cycles + shift;
-					full_cycles = 0;
-				} else {
-					full_cycles = req1_cycles + shift;
-				}
-				half_delay = (double)half_cycles * ns * (1 + 0.92);
-				full_delay = (double)full_cycles * ns;
-				delta = (long long unsigned)(full_delay + half_delay);
-
-				t_delta.tv_sec = delta / 1000000000ULL;
-				t_delta.tv_nsec = delta - t_delta.tv_sec * 1000000000ULL;
-				d->predict2 = t_add(time, t_delta);
-				d->req2_done = 0; d->req1_done = 0;
-			}
-
-			if (d->job_switched) {
-				memcpy(o2p, op, sizeof(struct bitfury_payload));
-				memcpy(op, p, sizeof(struct bitfury_payload));
-				memcpy(oldbuf, newbuf, 17 * 4);
-			}
+			
 		}
-
-		clock_gettime(CLOCK_REALTIME, &(time));
-		d_time = t_diff(time, d->predict2);
-		if (d_time.tv_sec < 0 && !d->req2_done) {
-			if(smart) {
-				d->otimer2 = d->timer2;
-				d->timer2 = time;
-				spi_clear_buf();
-				spi_emit_break();
-				spi_emit_fasync(chip);
-				spi_emit_data(0x3000, (void*)&atrvec[0], 19*4);
-				if (smart) {
-					config_reg(3,1);
-				}
-				select_slot(slot);
-				spi_txrx(spi_gettxbuf(), spi_getrxbuf(), spi_getbufsz());
-				deselect_slot(slot);
-				memcpy(newbuf, spi_getrxbuf()+4 + chip, 17*4);
-				d->counter2 = get_counter(newbuf, oldbuf);
-
-				d->req2_done = 1;
-			} else {
-				d->req2_done = 1;
-			}
+		d->nonces_found++;
+		d->results_n = results_num;
+		
+		if (d->job_switched) {
+			memcpy(o2p, op, sizeof(struct bitfury_payload));
+			memcpy(op, p, sizeof(struct bitfury_payload));
+			memcpy(oldbuf, newbuf, 17 * 4);
 		}
+			
 	}
 	second_run = 1;
+	init_this_chip ++;
+	if (init_this_chip == chip_n)
+		init_this_chip = 0;
 	return;
 }
 

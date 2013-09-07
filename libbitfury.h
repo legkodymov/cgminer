@@ -52,19 +52,13 @@ struct bitfury_device {
 	struct bitfury_payload opayload;
 	struct bitfury_payload o2payload;
 	unsigned int results[16];
+	unsigned int old_results[16];
+	unsigned int future_results[16];
 	int results_n;
+	int old_results_n;
+	int future_results_n;
 	time_t stat_ts[BITFURY_STAT_N];
 	unsigned int stat_counter;
-	unsigned int future_nonce;
-	unsigned int old_nonce;
-	struct timespec timer1;
-	struct timespec timer2;
-	struct timespec otimer1;
-	struct timespec otimer2;
-	struct timespec predict1;
-	struct timespec predict2;
-	unsigned int counter1, counter2;
-	unsigned int ocounter1, ocounter2;
 	int rate; //per msec
 	int osc_slow;
 	int osc_fast;
@@ -73,7 +67,8 @@ struct bitfury_device {
 	double ns;
 	unsigned slot;
 	unsigned fasync;
-	unsigned strange_counter;
+	unsigned nonces_found;
+	unsigned nonce_errors;
 };
 
 int libbitfury_readHashData(unsigned int *res);

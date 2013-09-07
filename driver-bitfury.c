@@ -74,17 +74,15 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 	int chip_n;
 	int chip;
 	uint64_t hashes = 0;
-	struct timeval now;
 	unsigned char line[2048];
-	int short_stat = 10;
-	static time_t short_out_t;
-	int long_stat = 1800;
-	static time_t long_out_t;
-	int long_long_stat = 60 * 30;
-	static time_t long_long_out_t;
+	
+	char stat_lines[32][256] = {0};
+	
 	static first = 0; //TODO Move to detect()
 	int i;
-
+	
+	static int shift_number = 1;
+	
 	devices = thr->cgpu->devices;
 	chip_n = thr->cgpu->chip_n;
 
@@ -108,13 +106,18 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 			work_to_payload(&(devices[chip].payload), devices[chip].work);
 		}
 	}
-
+	
 	libbitfury_sendHashData(devices, chip_n);
-	nmsleep(5);
+	
 
-	cgtime(&now);
+	
 	chip = 0;
+	int high = 0;
+	double aveg = 0.0;
+	int total = 0;
+	int futures =0;
 	for (;chip < chip_n; chip++) {
+		
 		if (devices[chip].job_switched) {
 			int i,j;
 			int *res = devices[chip].results;
@@ -122,28 +125,38 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 			struct work *owork = devices[chip].owork;
 			struct work *o2work = devices[chip].o2work;
 			i = devices[chip].results_n;
-			for (j = i - 1; j >= 0; j--) {
+			for (j = 0; j < i;j++) {
 				if (owork) {
 					submit_nonce(thr, owork, bswap_32(res[j]));
-					devices[chip].stat_ts[devices[chip].stat_counter++] =
-						now.tv_sec;
-					if (devices[chip].stat_counter == BITFURY_STAT_N) {
-						devices[chip].stat_counter = 0;
-					}
 				}
 				if (o2work) {
 					// TEST
 					//submit_nonce(thr, owork, bswap_32(res[j]));
 				}
 			}
-			if (devices[chip].old_nonce && o2work) {
-					submit_nonce(thr, o2work, bswap_32(devices[chip].old_nonce));
-					i++;
+			res = devices[chip].old_results;
+			int k = devices[chip].old_results_n;
+			i=i+k;
+			for (j = 0; j < k; j++) {
+				if (o2work) {
+					submit_nonce(thr, o2work, bswap_32(res[j]));
+				}
 			}
-			if (devices[chip].future_nonce) {
-					submit_nonce(thr, work, bswap_32(devices[chip].future_nonce));
-					i++;
+			
+			res = devices[chip].future_results;
+			k = devices[chip].future_results_n;
+			i=i+k;
+			for (j = 0; j < k; j++) {
+				if (work) {
+					submit_nonce(thr, work, bswap_32(res[j]));
+				}
 			}
+			high = high > i?high:i;
+			total+=i;
+			futures+=devices[chip].future_results_n;
+			devices[chip].future_results_n = 0;
+			devices[chip].old_results_n = 0;
+
 			devices[chip].results_n = 0;
 			devices[chip].job_switched = 0;
 
@@ -155,95 +168,30 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 			devices[chip].work = NULL;
 			hashes += 0xffffffffull * i;
 		}
-	}
-/*
-	if (now.tv_sec - short_out_t > short_stat) {
-		int shares_first = 0, shares_last = 0, shares_total = 0;
-		char stat_lines[32][256] = {0};
-		int len, k;
-		double gh[32][8] = {0};
-		double ghsum = 0, gh1h = 0, gh2h = 0;
-		unsigned strange_counter = 0;
-
-		for (chip = 0; chip < chip_n; chip++) {
-			int shares_found = calc_stat(devices[chip].stat_ts, short_stat, now);
-			double ghash;
-			len = strlen(stat_lines[devices[chip].slot]);
-			ghash = shares_to_ghashes(shares_found, short_stat);
-			gh[devices[chip].slot][chip & 0x07] = ghash;
-			snprintf(stat_lines[devices[chip].slot] + len, 256 - len, "%.1f-%3.0f ", ghash, devices[chip].mhz);
-
-			if(short_out_t && ghash < 0.5) {
-				applog(LOG_WARNING, "Chip_id %d FREQ CHANGE\n", chip);
-				send_freq(devices[chip].slot, devices[chip].fasync, devices[chip].osc6_bits - 1);
-				nmsleep(1);
-				send_freq(devices[chip].slot, devices[chip].fasync, devices[chip].osc6_bits);
-			}
-			shares_total += shares_found;
-			shares_first += chip < 4 ? shares_found : 0;
-			shares_last += chip > 3 ? shares_found : 0;
-			strange_counter += devices[chip].strange_counter;
-			devices[chip].strange_counter = 0;
+		/*
+		if(shift_number % 100 == 0)
+		{
+			int len = strlen(stat_lines[devices[chip].slot]);
+			snprintf(stat_lines[devices[chip].slot]+len,256-len,"%d: %d/%d ",chip,devices[chip].nonces_found/devices[chip].nonce_errors);
 		}
-		sprintf(line, "vvvvwww SHORT stat %ds: wwwvvvv", short_stat);
-		applog(LOG_WARNING, line);
-		sprintf(line, "stranges: %u", strange_counter);
-		applog(LOG_WARNING, line);
-		for(i = 0; i < 32; i++)
-			if(strlen(stat_lines[i])) {
-				len = strlen(stat_lines[i]);
-				ghsum = 0;
-				gh1h = 0;
-				gh2h = 0;
-				for(k = 0; k < 4; k++) {
-					gh1h += gh[i][k];
-					gh2h += gh[i][k+4];
-					ghsum += gh[i][k] + gh[i][k+4];
-				}
-				snprintf(stat_lines[i] + len, 256 - len, "- %2.1f + %2.1f = %2.1f slot %i ", gh1h, gh2h, ghsum, i);
-				applog(LOG_WARNING, stat_lines[i]);
-			}
-		short_out_t = now.tv_sec;
+		*/
+		
+	}
+	aveg = (double) total / chip_n;
+	//applog(LOG_WARNING, "high: %d aver: %4.2f total %d futures %d", high, aveg,total,futures);
+	if(shift_number % 100 == 0)
+	{
+		/*
+		applog(LOG_WARNING,stat_lines[0]);
+		applog(LOG_WARNING,stat_lines[1]);
+		applog(LOG_WARNING,stat_lines[2]);
+		applog(LOG_WARNING,stat_lines[3]);
+		*/
 	}
 
-	if (now.tv_sec - long_out_t > long_stat) {
-		int shares_first = 0, shares_last = 0, shares_total = 0;
-		char stat_lines[32][256] = {0};
-		int len, k;
-		double gh[32][8] = {0};
-		double ghsum = 0, gh1h = 0, gh2h = 0;
-
-		for (chip = 0; chip < chip_n; chip++) {
-			int shares_found = calc_stat(devices[chip].stat_ts, long_stat, now);
-			double ghash;
-			len = strlen(stat_lines[devices[chip].slot]);
-			ghash = shares_to_ghashes(shares_found, long_stat);
-			gh[devices[chip].slot][chip & 0x07] = ghash;
-			snprintf(stat_lines[devices[chip].slot] + len, 256 - len, "%.1f-%3.0f ", ghash, devices[chip].mhz);
-
-			shares_total += shares_found;
-			shares_first += chip < 4 ? shares_found : 0;
-			shares_last += chip > 3 ? shares_found : 0;
-		}
-		sprintf(line, "!!!_________ LONG stat %ds: ___________!!!", long_stat);
-		applog(LOG_WARNING, line);
-		for(i = 0; i < 32; i++)
-			if(strlen(stat_lines[i])) {
-				len = strlen(stat_lines[i]);
-				ghsum = 0;
-				gh1h = 0;
-				gh2h = 0;
-				for(k = 0; k < 4; k++) {
-					gh1h += gh[i][k];
-					gh2h += gh[i][k+4];
-					ghsum += gh[i][k] + gh[i][k+4];
-				}
-				snprintf(stat_lines[i] + len, 256 - len, "- %2.1f + %2.1f = %2.1f slot %i ", gh1h, gh2h, ghsum, i);
-				applog(LOG_WARNING, stat_lines[i]);
-			}
-		long_out_t = now.tv_sec;
-	}
-*/
+	
+	shift_number++;
+	restart_wait(100);
 	return hashes;
 }
 
