@@ -507,10 +507,6 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 	int buf_diff;
 	static unsigned second_run;
 	
-	static int fix_this_chip = -1;
-	if(!second_run)
-		fix_this_chip = 0;
-	
 	for (chip_id = 0; chip_id < chip_n; chip_id++) {
 		unsigned char *hexstr;
 		struct bitfury_device *d = bf + chip_id;
@@ -542,14 +538,8 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 			d->otimer1 = d->timer1;
 			d->timer1 = time;
 			d->ocounter1 = d->counter1;
-			select_slot(slot);
-			
-			// send reinit 
-			if (chip_id == fix_this_chip)
-			{
-				send_reinit(d->slot, chip_id, d->osc6_bits);
-			}
 			/* Programming next value */
+			select_slot(slot);
 			spi_clear_buf(); spi_emit_break();
 			spi_emit_fasync(chip);
 			spi_emit_data(0x3000, (void*)&atrvec[0], 19*4);
@@ -762,9 +752,6 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 		}
 	}
 	second_run = 1;
-	fix_this_chip++;
-	if(fix_this_chip == chip_n)
-		fix_this_chip = 0;
 	return;
 }
 
