@@ -562,7 +562,7 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 		d->job_switched = newbuf[16] != oldbuf[16];
 
 		int i;
-		int results_num = 0;
+		int results_num = 0, o_results_num = 0, f_results_num=0;
 		int found = 0;
 		unsigned * results = d->results;
 
@@ -603,7 +603,7 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x2C00000)? pn + 0x2C00000 : 0;
 				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x400000) ? pn + 0x400000 : 0;
 				if (s) {
-					d->old_results[d->old_results_n++] = bswap_32(s);
+					d->old_results[o_results_num++] = bswap_32(s);
 					found++;
 				}
 
@@ -616,7 +616,7 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x2C00000)? pn + 0x2C00000 : 0;
 				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x400000) ? pn + 0x400000 : 0;
 				if (s) {
-					d->future_results[d->future_results_n++] = bswap_32(s);;
+					d->future_results[f_results_num++] = bswap_32(s);;
 					found++;
 				}
 				if (!found) {
@@ -627,6 +627,8 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 		}
 		d->nonces_found++;
 		d->results_n = results_num;
+		d->old_results_n = o_results_num;
+		d->future_results_n = f_results_num;
 		
 		if (d->job_switched) {
 			memcpy(o2p, op, sizeof(struct bitfury_payload));

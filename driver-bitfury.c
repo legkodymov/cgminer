@@ -154,10 +154,12 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 			high = high > i?high:i;
 			total+=i;
 			futures+=devices[chip].future_results_n;
+			/*
 			devices[chip].future_results_n = 0;
 			devices[chip].old_results_n = 0;
 
 			devices[chip].results_n = 0;
+			*/
 			devices[chip].job_switched = 0;
 
 			if (o2work)
