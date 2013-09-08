@@ -544,14 +544,14 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 		
 		//spi_emit_break();
 		spi_emit_fasync(chip);
-		/*
+		
 		if(init_this_chip == chip_id)
 		{
 			set_freq(d->osc6_bits);
 			send_conf();
 			send_init();
 		}
-		*/
+		
 		spi_emit_data(0x3000, (void*)&atrvec[0], 19*4);
 
 		spi_txrx(spi_gettxbuf(), spi_getrxbuf(), spi_getbufsz());
