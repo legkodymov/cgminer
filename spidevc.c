@@ -55,7 +55,7 @@ void spi_init(void)
 #define GPIO_SET *(gpio+7)  // sets   bits which are 1 ignores bits which are 0
 #define GPIO_CLR *(gpio+10) // clears bits which are 1 ignores bits which are 0
 
-#define RESET_TOGGLES 32
+#define RESET_TOGGLES 8
 
 // Bit-banging reset, to reset more chips in chain - toggle for longer period... Each 3 reset cycles reset first chip in chain
 int spi_reset(int a)

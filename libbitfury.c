@@ -509,6 +509,40 @@ void work_to_payload(struct bitfury_payload *p, struct work *w) {
 	p->nbits = bswap_32(*(unsigned *)(flipped_data + 72));
 }
 
+int check_nonce(struct bitfury_payload *p, unsigned check)
+{
+	int s = 0;
+	unsigned pn;
+	pn = decnonce(check);
+	s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn) ? pn : 0;
+	s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn-0x400000) ? pn - 0x400000 : 0;
+	s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn-0x800000) ? pn - 0x800000 : 0;
+	s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x2800000)? pn + 0x2800000 : 0;
+	s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x2C00000)? pn + 0x2C00000 : 0;
+	s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x400000) ? pn + 0x400000 : 0;
+	return s;
+}
+int scan_nonces(struct bitfury_work *w, unsigned check)
+{
+	int s=check_nonce(&(w->payload),check);
+	int found = 0;
+	if (s) {
+		int k;
+		int dup = 0;
+		for (k = 0; k < w->results_n; k++) {
+			if (w->results[k] == bswap_32(s)) {
+				dup = 1;
+			}
+		}
+		if (!dup) {
+			w->results[w->results_n++] = bswap_32(s);
+			found++;
+		}
+	}
+	return found;
+	
+}
+
 int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 	int chip_id;
 	int buf_diff;
@@ -519,11 +553,10 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 	for (chip_id = 0; chip_id < chip_n; chip_id++) {
 		unsigned char *hexstr;
 		struct bitfury_device *d = bf + chip_id;
+		struct bitfury_payload *p = &(d->bfwork.payload);
 		unsigned *newbuf = d->newbuf;
 		unsigned *oldbuf = d->oldbuf;
-		struct bitfury_payload *p = &(d->bfwork.payload);
-		struct bitfury_payload *op = &(d->obfwork.payload);
-		struct bitfury_payload *o2p = &(d->o2bfwork.payload);
+
 		struct timespec d_time;
 		struct timespec time;
 
@@ -537,15 +570,15 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 		/* Programming next value */
 		spi_clear_buf();
 		int newslot = select_slot(slot);
-		if (!newslot||chip_id == 0)
+		if (newslot||chip_id == 0)
 		{
 			
 		} 
-		spi_emit_break();
+		
 
 		
 		
-		//spi_emit_break();
+		spi_emit_break();
 		spi_emit_fasync(chip);
 		
 		if(init_this_chip == chip_id)
@@ -559,104 +592,49 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 
 		spi_txrx(spi_gettxbuf(), spi_getrxbuf(), spi_getbufsz());
 		memcpy(newbuf, spi_getrxbuf()+4 + chip, 17*4);
-		spi_emit_fasync(1);
+		//spi_emit_fasync(1);
 		deselect_slot(slot);
 
 		d->job_switched = newbuf[16] != oldbuf[16];
 
+
+			
+	}
+	
+	for (chip_id = 0; chip_id < chip_n; chip_id++) {
+		struct bitfury_device *d = bf + chip_id;
+		struct bitfury_payload *p = &(d->bfwork.payload);
+		struct bitfury_payload *op = &(d->obfwork.payload);
+		struct bitfury_payload *o2p = &(d->o2bfwork.payload);
 		int i;
 
 		int found = 0;
 		unsigned * results = d->obfwork.results;
 
 		for (i = 0; i < 16; i++) {
-			if (oldbuf[i] != newbuf[i] && op && o2p) {
-				unsigned pn; //possible nonce
-				unsigned int s = 0; //TODO zero may be solution
-				unsigned int old_f = 0;
-				if ((newbuf[i] & 0xFF) == 0xE0)
-					continue;
-				pn = decnonce(newbuf[i]);
-				s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn) ? pn : 0;
-				s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn-0x00400000) ? pn - 0x00400000 : 0;
-				s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn-0x00800000) ? pn - 0x00800000 : 0;
-				s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x02800000) ? pn + 0x02800000 : 0;
-				s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x02C00000) ? pn + 0x02C00000 : 0;
-				s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x00400000) ? pn + 0x00400000 : 0;
-				if (s) {
-					int k;
-					int dup = 0;
-					for (k = 0; k < d->obfwork.results_n; k++) {
-						if (results[k] == bswap_32(s)) {
-							dup = 1;
-						}
-					}
-					if (!dup) {
-						results[d->obfwork.results_n++] = bswap_32(s);
-						found++;
-					}
+			if (d->job_switched) {
+				if(op)
+				{
+					found+=scan_nonces(&(d->obfwork), d->newbuf[i]);
 				}
-
-				s = 0;
-				pn = decnonce(newbuf[i]);
-				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn) ? pn : 0;
-				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn-0x400000) ? pn - 0x400000 : 0;
-				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn-0x800000) ? pn - 0x800000 : 0;
-				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x2800000)? pn + 0x2800000 : 0;
-				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x2C00000)? pn + 0x2C00000 : 0;
-				s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x400000) ? pn + 0x400000 : 0;
-				if (s) {
-					
-					int k;
-					int dup = 0;
-					for (k = 0; k < d->o2bfwork.results_n; k++) {
-						if (d->o2bfwork.results[k] == bswap_32(s)) {
-							dup = 1;
-						}
-					}
-					if (!dup) {
-						d->o2bfwork.results[d->o2bfwork.results_n++] = bswap_32(s);
-						found++;
-					}
+				if (o2p)
+				{
+					found+=scan_nonces(&(d->o2bfwork), d->newbuf[i]);
 				}
-
-				s = 0;
-				pn = decnonce(newbuf[i]);
-				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn) ? pn : 0;
-				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn-0x400000) ? pn - 0x400000 : 0;
-				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn-0x800000) ? pn - 0x800000 : 0;
-				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x2800000)? pn + 0x2800000 : 0;
-				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x2C00000)? pn + 0x2C00000 : 0;
-				s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x400000) ? pn + 0x400000 : 0;
-				if (s) {
-					int k;
-					int dup = 0;
-					for (k = 0; k < d->bfwork.results_n; k++) {
-						if (d->bfwork.results[k] == bswap_32(s)) {
-							dup = 1;
-						}
-					}
-					if (!dup) {
-						d->bfwork.results[d->bfwork.results_n++] = bswap_32(s);
-						found++;
-					}
-				}
-				if (!found) {
-					//d->nonce_errors++;
-				}
+				found+=scan_nonces(&(d->bfwork), d->newbuf[i]);
 			}
-			
 		}
 
-		d->nonces_found++;
+		d->nonces_found+=found;
 		
 		if (d->job_switched) {
 
 
-			memcpy(oldbuf, newbuf, 17 * 4);
+			memcpy(d->oldbuf, d->newbuf, 17 * 4);
 		}
-			
+		
 	}
+	
 	second_run = 1;
 	init_this_chip ++;
 	if (init_this_chip == chip_n)

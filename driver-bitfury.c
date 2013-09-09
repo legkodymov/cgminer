@@ -119,24 +119,24 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 	int total = 0;
 	int futures =0;
 	for (;chip < chip_n; chip++) {
-		
-		
+
 		if (devices[chip].job_switched) {
 			int i=0;
 			struct work *work = devices[chip].bfwork.work;
 			struct work *owork = devices[chip].obfwork.work;
 			struct work *o2work = devices[chip].o2bfwork.work;
-			
+
 			if (owork)
 				i+=submit_work(&devices[chip].obfwork, thr);
 			if (o2work)
 				i+=submit_work(&devices[chip].o2bfwork, thr);
 			if (work)
 				i+=submit_work(&devices[chip].bfwork, thr);	
-			
+
 
 			high = high > i?high:i;
 			total+=i;
+
 			devices[chip].job_switched = 0;
 
 			if (o2work)
@@ -176,7 +176,7 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 
 	
 	shift_number++;
-	restart_wait(100);
+	restart_wait(200);
 	return hashes;
 }
 
