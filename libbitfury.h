@@ -39,24 +39,22 @@ struct bitfury_payload {
 	unsigned nbits;
 	unsigned nnonce;
 };
-
+struct bitfury_work {
+	struct work * work;
+	int results_n;
+	int results_sent;
+	struct bitfury_payload payload;
+	unsigned int results[64];
+};
 struct bitfury_device {
 	unsigned char osc6_bits;
 	unsigned newbuf[17];
 	unsigned oldbuf[17];
-	struct work * work;
-	struct work * owork;
-	struct work * o2work;
 	int job_switched;
-	struct bitfury_payload payload;
-	struct bitfury_payload opayload;
-	struct bitfury_payload o2payload;
-	unsigned int results[16];
-	unsigned int old_results[16];
-	unsigned int future_results[16];
-	int results_n;
-	int old_results_n;
-	int future_results_n;
+
+	struct bitfury_work bfwork;
+	struct bitfury_work obfwork;
+	struct bitfury_work o2bfwork;
 	time_t stat_ts[BITFURY_STAT_N];
 	unsigned int stat_counter;
 	int rate; //per msec

@@ -40,6 +40,8 @@ static bool bitfury_prepare(struct thr_info *thr);
 int calc_stat(time_t * stat_ts, time_t stat, struct timeval now);
 double shares_to_ghashes(int shares, int seconds);
 
+int submit_work(struct bitfury_work *w, struct thr_info *thr);
+
 static void bitfury_detect(void)
 {
 	int chip_n;
@@ -98,12 +100,12 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 
 	for (chip = 0; chip < chip_n; chip++) {
 		devices[chip].job_switched = 0;
-		if(!devices[chip].work) {
-			devices[chip].work = get_queued(thr->cgpu);
-			if (devices[chip].work == NULL) {
+		if(!devices[chip].bfwork.work) {
+			devices[chip].bfwork.work = get_queued(thr->cgpu);
+			if (devices[chip].bfwork.work == NULL) {
 				return 0;
 			}
-			work_to_payload(&(devices[chip].payload), devices[chip].work);
+			work_to_payload(&(devices[chip].bfwork.payload), devices[chip].bfwork.work);
 		}
 	}
 	
@@ -118,56 +120,35 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 	int futures =0;
 	for (;chip < chip_n; chip++) {
 		
+		
 		if (devices[chip].job_switched) {
-			int i,j;
-			int *res = devices[chip].results;
-			struct work *work = devices[chip].work;
-			struct work *owork = devices[chip].owork;
-			struct work *o2work = devices[chip].o2work;
-			i = devices[chip].results_n;
-			for (j = 0; j < i;j++) {
-				if (owork) {
-					submit_nonce(thr, owork, bswap_32(res[j]));
-				}
-				if (o2work) {
-					// TEST
-					//submit_nonce(thr, owork, bswap_32(res[j]));
-				}
-			}
-			res = devices[chip].old_results;
-			int k = devices[chip].old_results_n;
-			i=i+k;
-			for (j = 0; j < k; j++) {
-				if (o2work) {
-					submit_nonce(thr, o2work, bswap_32(res[j]));
-				}
-			}
+			int i=0;
+			struct work *work = devices[chip].bfwork.work;
+			struct work *owork = devices[chip].obfwork.work;
+			struct work *o2work = devices[chip].o2bfwork.work;
 			
-			res = devices[chip].future_results;
-			k = devices[chip].future_results_n;
-			i=i+k;
-			for (j = 0; j < k; j++) {
-				if (work) {
-					submit_nonce(thr, work, bswap_32(res[j]));
-				}
-			}
+			if (owork)
+				i+=submit_work(&devices[chip].obfwork, thr);
+			if (o2work)
+				i+=submit_work(&devices[chip].o2bfwork, thr);
+			if (work)
+				i+=submit_work(&devices[chip].bfwork, thr);	
+			
+
 			high = high > i?high:i;
 			total+=i;
-			futures+=devices[chip].future_results_n;
-			/*
-			devices[chip].future_results_n = 0;
-			devices[chip].old_results_n = 0;
-
-			devices[chip].results_n = 0;
-			*/
 			devices[chip].job_switched = 0;
 
 			if (o2work)
 				work_completed(thr->cgpu, o2work);
 
-			devices[chip].o2work = devices[chip].owork;
-			devices[chip].owork = devices[chip].work;
-			devices[chip].work = NULL;
+			//printf("%d %d %d\n",devices[chip].o2bfwork.results_n,devices[chip].obfwork.results_n,devices[chip].bfwork.results_n);
+			
+			memcpy (&(devices[chip].o2bfwork),&(devices[chip].obfwork),sizeof(struct bitfury_work));
+			memcpy (&(devices[chip].obfwork),&(devices[chip].bfwork),sizeof(struct bitfury_work));
+			devices[chip].bfwork.work = NULL;
+			devices[chip].bfwork.results_n = 0;
+			devices[chip].bfwork.results_sent = 0;
 			hashes += 0xffffffffull * i;
 		}
 		/*
@@ -179,11 +160,13 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 		*/
 		
 	}
+
 	aveg = (double) total / chip_n;
 	//applog(LOG_WARNING, "high: %d aver: %4.2f total %d futures %d", high, aveg,total,futures);
 	if(shift_number % 100 == 0)
 	{
 		/*
+
 		applog(LOG_WARNING,stat_lines[0]);
 		applog(LOG_WARNING,stat_lines[1]);
 		applog(LOG_WARNING,stat_lines[2]);
@@ -195,6 +178,18 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 	shift_number++;
 	restart_wait(100);
 	return hashes;
+}
+
+int submit_work(struct bitfury_work *w, struct thr_info *thr)
+{
+	int i=0,j;
+	int *res = w->results;
+	for (j = w->results_sent; j < w->results_n;j++) {
+		submit_nonce(thr, w->work, bswap_32(res[j]));
+		w->results_sent++;
+		i++;
+	}
+	return i;
 }
 
 double shares_to_ghashes(int shares, int seconds) {
