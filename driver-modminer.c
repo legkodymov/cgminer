@@ -553,7 +553,7 @@ static bool modminer_fpga_upload_bitstream(struct cgpu_info *modminer)
 		modminer->drv->name, modminer->device_id, devmsg);
 
 	// Give it a 2/3s delay after programming
-	nmsleep(666);
+	cgsleep_ms(666);
 
 	usb_set_dev_start(modminer);
 
@@ -569,13 +569,9 @@ dame:
 
 static bool modminer_fpga_prepare(struct thr_info *thr)
 {
-	struct cgpu_info *modminer = thr->cgpu;
-	struct timeval now;
-
-	cgtime(&now);
-	get_datestamp(modminer->init, &now);
-
+//	struct cgpu_info *modminer = thr->cgpu;
 	struct modminer_fpga_state *state;
+
 	state = thr->cgpu_data = calloc(1, sizeof(struct modminer_fpga_state));
 	state->shares_to_good = MODMINER_EARLY_UP;
 	state->overheated = false;
@@ -741,16 +737,12 @@ static bool modminer_fpga_init(struct thr_info *thr)
 	return true;
 }
 
-static void get_modminer_statline_before(char *buf, struct cgpu_info *modminer)
+static void get_modminer_statline_before(char *buf, size_t bufsiz, struct cgpu_info *modminer)
 {
-	char info[64];
-
-	sprintf(info, " %s%.1fC %3uMHz  | ",
+	tailsprintf(buf, bufsiz, " %s%.1fC %3uMHz  | ",
 			(modminer->temp < 10) ? " " : "",
 			modminer->temp,
 			(unsigned int)(modminer->clock));
-
-	strcat(buf, info);
 }
 
 static bool modminer_start_work(struct thr_info *thr, struct work *work)
@@ -1024,7 +1016,7 @@ tryagain:
 			break;
 
 		// 1/10th sec to lower CPU usage
-		nmsleep(100);
+		cgsleep_ms(100);
 		if (work_restart(thr))
 			break;
 	}
@@ -1073,7 +1065,7 @@ static int64_t modminer_scanhash(struct thr_info *thr, struct work *work, int64_
 					return 0;
 
 				// Give it 1s rest then check again
-				nmsleep(1000);
+				cgsleep_ms(1000);
 			}
 		}
 	}

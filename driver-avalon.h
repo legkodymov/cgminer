@@ -33,9 +33,15 @@
 #define AVALON_TEMP_HYSTERESIS 3
 #define AVALON_TEMP_OVERHEAT 60
 
+#define BITBURNER_DEFAULT_CORE_VOLTAGE 1200 /* in millivolts */
+#define BITBURNER_MIN_COREMV 1000
+/* change here if you want to risk killing it :)  */
+#define BITBURNER_MAX_COREMV 1400
+
+
 #define AVALON_DEFAULT_TIMEOUT 0x2D
 #define AVALON_MIN_FREQUENCY 256
-#define AVALON_MAX_FREQUENCY 450
+#define AVALON_MAX_FREQUENCY 1024
 #define AVALON_TIMEOUT_FACTOR 12690
 #define AVALON_DEFAULT_FREQUENCY 282
 #define AVALON_DEFAULT_MINER_NUM 0x20
@@ -113,6 +119,8 @@ struct avalon_info {
 	int temp_old;
 	int fan_pwm;
 
+	int core_voltage;
+
 	int no_matching_work;
 	int matching_work[AVALON_DEFAULT_MINER_NUM];
 
@@ -124,7 +132,6 @@ struct avalon_info {
 	pthread_mutex_t lock;
 	pthread_mutex_t qlock;
 	pthread_cond_t qcond;
-	cgsem_t write_sem;
 	int nonces;
 
 	int auto_queued;
@@ -135,11 +142,20 @@ struct avalon_info {
 	bool reset;
 	bool overheat;
 	bool optimal;
+
+	uint8_t version1;
+	uint8_t version2;
+	uint8_t version3;
 };
+
+#define BITBURNER_VERSION1 1
+#define BITBURNER_VERSION2 0
+#define BITBURNER_VERSION3 0
 
 #define AVALON_WRITE_SIZE (sizeof(struct avalon_task))
 #define AVALON_READ_SIZE (sizeof(struct avalon_result))
 #define AVALON_ARRAY_SIZE 3
+#define BITBURNER_ARRAY_SIZE 4
 
 #define AVA_GETS_ERROR -1
 #define AVA_GETS_OK 0
@@ -161,6 +177,7 @@ extern int opt_avalon_fan_max;
 extern int opt_avalon_freq_min;
 extern int opt_avalon_freq_max;
 extern bool opt_avalon_auto;
+extern int opt_bitburner_core_voltage;
 extern char *set_avalon_fan(char *arg);
 extern char *set_avalon_freq(char *arg);
 

@@ -117,7 +117,7 @@ static inline int fsync (int fd)
  #include "ADL_SDK/adl_sdk.h"
 #endif
 
-#ifdef HAVE_LIBUSB
+#ifdef USE_USBUTILS
   #include <libusb.h>
 #endif
 
@@ -299,7 +299,7 @@ struct gpu_adl {
 };
 #endif
 
-extern void blank_get_statline_before(char *buf, struct cgpu_info __maybe_unused *cgpu);
+extern void blank_get_statline_before(char *buf, size_t bufsiz, struct cgpu_info __maybe_unused *cgpu);
 
 struct api_data;
 struct thr_info;
@@ -316,8 +316,8 @@ struct device_drv {
 
 	// Device-specific functions
 	void (*reinit_device)(struct cgpu_info *);
-	void (*get_statline_before)(char *, struct cgpu_info *);
-	void (*get_statline)(char *, struct cgpu_info *);
+	void (*get_statline_before)(char *, size_t, struct cgpu_info *);
+	void (*get_statline)(char *, size_t, struct cgpu_info *);
 	struct api_data *(*get_api_stats)(struct cgpu_info *);
 	bool (*get_stats)(struct cgpu_info *);
 	void (*identify_device)(struct cgpu_info *); // e.g. to flash a led
@@ -724,16 +724,24 @@ endian_flip128(void __maybe_unused *dest_p, const void __maybe_unused *src_p)
 
 extern void _quit(int status);
 
-static inline void mutex_lock(pthread_mutex_t *lock)
+#define mutex_lock(_lock) _mutex_lock(_lock, __FILE__, __func__, __LINE__) 
+#define mutex_unlock_noyield(_lock) _mutex_unlock_noyield(_lock, __FILE__, __func__, __LINE__) 
+#define wr_lock(_lock) _wr_lock(_lock, __FILE__, __func__, __LINE__) 
+#define rd_lock(_lock) _rd_lock(_lock, __FILE__, __func__, __LINE__) 
+#define rw_unlock(_lock) _rw_unlock(_lock, __FILE__, __func__, __LINE__) 
+#define mutex_init(_lock) _mutex_init(_lock, __FILE__, __func__, __LINE__) 
+#define rwlock_init(_lock) _rwlock_init(_lock, __FILE__, __func__, __LINE__) 
+
+static inline void _mutex_lock(pthread_mutex_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_mutex_lock(lock)))
-		quit(1, "WTF MUTEX ERROR ON LOCK!");
+		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON LOCK! errno=%d", errno);
 }
 
-static inline void mutex_unlock_noyield(pthread_mutex_t *lock)
+static inline void _mutex_unlock_noyield(pthread_mutex_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_mutex_unlock(lock)))
-		quit(1, "WTF MUTEX ERROR ON UNLOCK!");
+		quitfrom(1, file, func, line, "WTF MUTEX ERROR ON UNLOCK! errno=%d", errno);
 }
 
 static inline void mutex_unlock(pthread_mutex_t *lock)
@@ -747,45 +755,56 @@ static inline int mutex_trylock(pthread_mutex_t *lock)
 	return pthread_mutex_trylock(lock);
 }
 
-static inline void wr_lock(pthread_rwlock_t *lock)
+static inline void _wr_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_rwlock_wrlock(lock)))
-		quit(1, "WTF WRLOCK ERROR ON LOCK!");
+		quitfrom(1, file, func, line, "WTF WRLOCK ERROR ON LOCK! errno=%d", errno);
 }
 
-static inline void rd_lock(pthread_rwlock_t *lock)
+static inline void _rd_lock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_rwlock_rdlock(lock)))
-		quit(1, "WTF RDLOCK ERROR ON LOCK!");
+		quitfrom(1, file, func, line, "WTF RDLOCK ERROR ON LOCK! errno=%d", errno);
 }
 
-static inline void rw_unlock(pthread_rwlock_t *lock)
+static inline void _rw_unlock(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_rwlock_unlock(lock)))
-		quit(1, "WTF RWLOCK ERROR ON UNLOCK!");
-	sched_yield();
+		quitfrom(1, file, func, line, "WTF RWLOCK ERROR ON UNLOCK! errno=%d", errno);
+}
+
+static inline void rd_unlock_noyield(pthread_rwlock_t *lock)
+{
+	rw_unlock(lock);
+}
+
+static inline void wr_unlock_noyield(pthread_rwlock_t *lock)
+{
+	rw_unlock(lock);
 }
 
 static inline void rd_unlock(pthread_rwlock_t *lock)
 {
 	rw_unlock(lock);
+	sched_yield();
 }
 
 static inline void wr_unlock(pthread_rwlock_t *lock)
 {
 	rw_unlock(lock);
+	sched_yield();
 }
 
-static inline void mutex_init(pthread_mutex_t *lock)
+static inline void _mutex_init(pthread_mutex_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_mutex_init(lock, NULL)))
-		quit(1, "Failed to pthread_mutex_init");
+		quitfrom(1, file, func, line, "Failed to pthread_mutex_init errno=%d", errno);
 }
 
-static inline void rwlock_init(pthread_rwlock_t *lock)
+static inline void _rwlock_init(pthread_rwlock_t *lock, const char *file, const char *func, const int line)
 {
 	if (unlikely(pthread_rwlock_init(lock, NULL)))
-		quit(1, "Failed to pthread_rwlock_init");
+		quitfrom(1, file, func, line, "Failed to pthread_rwlock_init errno=%d", errno);
 }
 
 /* cgminer locks, a write biased variant of rwlocks */
@@ -829,6 +848,14 @@ static inline void cg_wlock(cglock_t *lock)
 	wr_lock(&lock->rwlock);
 }
 
+/* Downgrade write variant to a read lock */
+static inline void cg_dwlock(cglock_t *lock)
+{
+	wr_unlock_noyield(&lock->rwlock);
+	rd_lock(&lock->rwlock);
+	mutex_unlock_noyield(&lock->mutex);
+}
+
 /* Downgrade intermediate variant to a read lock */
 static inline void cg_dlock(cglock_t *lock)
 {
@@ -849,6 +876,9 @@ static inline void cg_wunlock(cglock_t *lock)
 
 struct pool;
 
+#define API_MCAST_CODE "FTW"
+#define API_MCAST_ADDR "224.0.0.75"
+
 extern bool opt_protocol;
 extern bool have_longpoll;
 extern char *opt_kernel_path;
@@ -859,6 +889,11 @@ extern bool opt_autofan;
 extern bool opt_autoengine;
 extern bool use_curses;
 extern char *opt_api_allow;
+extern bool opt_api_mcast;
+extern char *opt_api_mcast_addr;
+extern char *opt_api_mcast_code;
+extern char *opt_api_mcast_des;
+extern int opt_api_mcast_port;
 extern char *opt_api_groups;
 extern char *opt_api_description;
 extern int opt_api_port;
@@ -928,10 +963,9 @@ extern pthread_rwlock_t devices_lock;
 extern pthread_mutex_t restart_lock;
 extern pthread_cond_t restart_cond;
 
-extern void thread_reportin(struct thr_info *thr);
 extern void clear_stratum_shares(struct pool *pool);
 extern void set_target(unsigned char *dest_target, double diff);
-extern int restart_wait(unsigned int mstime);
+extern int restart_wait(struct thr_info *thr, unsigned int mstime);
 
 extern void kill_work(void);
 
@@ -958,14 +992,26 @@ extern bool add_pool_details(struct pool *pool, bool live, char *url, char *user
 #define MAX_GPUDEVICES 16
 #define MAX_DEVICES 4096
 
-#define MIN_INTENSITY -10
-#define _MIN_INTENSITY_STR "-10"
+#define MIN_SHA_INTENSITY -10
+#define MIN_SHA_INTENSITY_STR "-10"
+#define MAX_SHA_INTENSITY 14
+#define MAX_SHA_INTENSITY_STR "14"
+#define MIN_SCRYPT_INTENSITY 8
+#define MIN_SCRYPT_INTENSITY_STR "8"
+#define MAX_SCRYPT_INTENSITY 20
+#define MAX_SCRYPT_INTENSITY_STR "20"
 #ifdef USE_SCRYPT
-#define MAX_INTENSITY 20
-#define _MAX_INTENSITY_STR "20"
+#define MIN_INTENSITY (opt_scrypt ? MIN_SCRYPT_INTENSITY : MIN_SHA_INTENSITY)
+#define MIN_INTENSITY_STR (opt_scrypt ? MIN_SCRYPT_INTENSITY_STR : MIN_SHA_INTENSITY_STR)
+#define MAX_INTENSITY (opt_scrypt ? MAX_SCRYPT_INTENSITY : MAX_SHA_INTENSITY)
+#define MAX_INTENSITY_STR (opt_scrypt ? MAX_SCRYPT_INTENSITY_STR : MAX_SHA_INTENSITY_STR)
+#define MAX_GPU_INTENSITY MAX_SCRYPT_INTENSITY
 #else
-#define MAX_INTENSITY 14
-#define _MAX_INTENSITY_STR "14"
+#define MIN_INTENSITY MIN_SHA_INTENSITY
+#define MIN_INTENSITY_STR MIN_SHA_INTENSITY_STR
+#define MAX_INTENSITY MAX_SHA_INTENSITY
+#define MAX_INTENSITY_STR MAX_SHA_INTENSITY_STR
+#define MAX_GPU_INTENSITY MAX_SHA_INTENSITY
 #endif
 
 extern bool hotplug_mode;
@@ -1010,6 +1056,7 @@ extern char *current_fullhash;
 extern double current_diff;
 extern uint64_t best_diff;
 extern struct timeval block_timeval;
+extern char *workpadding;
 
 #ifdef HAVE_OPENCL
 typedef struct {
@@ -1062,18 +1109,13 @@ enum pool_enable {
 struct stratum_work {
 	char *job_id;
 	char *prev_hash;
-	char *coinbase1;
-	char *coinbase2;
-	char **merkle;
+	unsigned char **merkle_bin;
 	char *bbversion;
 	char *nbit;
 	char *ntime;
 	bool clean;
 
-	size_t cb1_len;
-	size_t cb2_len;
 	size_t cb_len;
-
 	size_t header_len;
 	int merkles;
 	double diff;
@@ -1154,7 +1196,11 @@ struct pool {
 	char *sockbuf;
 	size_t sockbuf_size;
 	char *sockaddr_url; /* stripped url used for sockaddr */
+	char *sockaddr_proxy_url;
+	char *sockaddr_proxy_port;
+
 	char *nonce1;
+	unsigned char *nonce1bin;
 	size_t n1_len;
 	uint32_t nonce2;
 	int n2size;
@@ -1182,10 +1228,16 @@ struct pool {
 	uint32_t gbt_version;
 	uint32_t curtime;
 	uint32_t gbt_bits;
-	unsigned char *gbt_coinbase;
 	unsigned char *txn_hashes;
 	int gbt_txns;
 	int coinbase_len;
+
+	/* Shared by both stratum & GBT */
+	unsigned char *coinbase;
+	int nonce2_offset;
+	unsigned char header_bin[128];
+	int merkle_offset;
+
 	struct timeval tv_lastwork;
 };
 
@@ -1229,13 +1281,14 @@ struct work {
 
 	bool		stratum;
 	char 		*job_id;
-	char		*nonce2;
+	uint32_t	nonce2;
+	size_t		nonce2_len;
 	char		*ntime;
 	double		sdiff;
 	char		*nonce1;
 
 	bool		gbt;
-	char		*gbt_coinbase;
+	char		*coinbase;
 	int		gbt_txns;
 
 	unsigned int	work_block;
@@ -1285,15 +1338,28 @@ struct modminer_fpga_state {
 };
 #endif
 
-extern void get_datestamp(char *, struct timeval *);
+#define TAILBUFSIZ 64
+
+#define tailsprintf(buf, bufsiz, fmt, ...) do { \
+	char tmp13[TAILBUFSIZ]; \
+	size_t len13, buflen = strlen(buf); \
+	snprintf(tmp13, sizeof(tmp13), fmt, ##__VA_ARGS__); \
+	len13 = strlen(tmp13); \
+	if ((buflen + len13) >= bufsiz) \
+		quit(1, "tailsprintf buffer overflow in %s %s line %d", __FILE__, __func__, __LINE__); \
+	strcat(buf, tmp13); \
+} while (0)
+
+extern void get_datestamp(char *, size_t, struct timeval *);
 extern void inc_hw_errors(struct thr_info *thr);
 extern bool submit_nonce(struct thr_info *thr, struct work *work, uint32_t nonce);
 extern struct work *get_queued(struct cgpu_info *cgpu);
 extern struct work *__find_work_bymidstate(struct work *que, char *midstate, size_t midstatelen, char *data, int offset, size_t datalen);
 extern struct work *find_queued_work_bymidstate(struct cgpu_info *cgpu, char *midstate, size_t midstatelen, char *data, int offset, size_t datalen);
+extern struct work *clone_queued_work_bymidstate(struct cgpu_info *cgpu, char *midstate, size_t midstatelen, char *data, int offset, size_t datalen);
 extern void work_completed(struct cgpu_info *cgpu, struct work *work);
+extern struct work *take_queued_work_bymidstate(struct cgpu_info *cgpu, char *midstate, size_t midstatelen, char *data, int offset, size_t datalen);
 extern void hash_queued_work(struct thr_info *mythr);
-extern void tailsprintf(char *f, const char *fmt, ...);
 extern void _wlog(const char *str);
 extern void _wlogprint(const char *str);
 extern int curses_int(const char *query);
@@ -1346,7 +1412,8 @@ enum api_data_type {
 	API_FREQ,
 	API_VOLTS,
 	API_HS,
-	API_DIFF
+	API_DIFF,
+	API_PERCENT
 };
 
 struct api_data {
@@ -1378,5 +1445,6 @@ extern struct api_data *api_add_freq(struct api_data *root, char *name, double *
 extern struct api_data *api_add_volts(struct api_data *root, char *name, float *data, bool copy_data);
 extern struct api_data *api_add_hs(struct api_data *root, char *name, double *data, bool copy_data);
 extern struct api_data *api_add_diff(struct api_data *root, char *name, double *data, bool copy_data);
+extern struct api_data *api_add_percent(struct api_data *root, char *name, double *data, bool copy_data);
 
 #endif /* __MINER_H__ */

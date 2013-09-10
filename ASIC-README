@@ -1,7 +1,11 @@
 SUPPORTED DEVICES
 
-Currently supported devices include the Avalon, the Butterfly Labs SC range
-of devices and the ASICMINER block erupters.
+Currently supported devices include the Avalon (including BitBurner), the
+Butterfly Labs SC range of devices and the ASICMINER block erupters. No COM
+ports on windows or TTY devices will be used by cgminer as it communicates
+directly with them via USB so it is normal for them to not exist or be
+disconnected when cgminer is running.
+
 
 The BFL devices should come up as one of the following:
 
@@ -19,6 +23,8 @@ Avalon devices need the --enable-avalon option when compiling cgminer.
 ASICMINER block erupters will come up as AMU.
 
 ASICMINER devices need the --enable-icarus option when compiling cgminer.
+Also note that the AMU is managed by the Icarus driver which is detailed
+in the FPGA-README
 
 
 GETTING STARTED WITH BUTTERFLY LABS ASICS
@@ -42,7 +48,8 @@ it from the cgminer directory in the DOWNLOADS link above.
 
 When you first switch a device over to WinUSB with zadig and it shows that
 correctly on the left of the zadig window, but it still gives permission
-errors, you may need to unplug the USB miner and then plug it back in
+errors, you may need to unplug the USB miner and then plug it back in. Some
+users may need to reboot at this point.
 
 
 LINUX:
@@ -70,6 +77,18 @@ After this you can either manually restart udev and re-login, or more easily
 just reboot.
 
 
+ASIC SPECIFIC COMMANDS
+
+--avalon-auto       Adjust avalon overclock frequency dynamically for best hashrate
+--avalon-cutoff <arg> Set avalon overheat cut off temperature (default: 60)
+--avalon-fan <arg> Set fanspeed percentage for avalon, single value or range (default: 20-100)
+--avalon-freq <arg> Set frequency range for avalon-auto, single value or range
+--avalon-options <arg> Set avalon options baud:miners:asic:timeout:freq
+--avalon-temp <arg> Set avalon target temperature (default: 50)
+--bflsc-overheat <arg> Set overheat temperature where BFLSC devices throttle, 0 to disable (default: 90)
+--bitburner-voltage <arg> Set BitBurner core voltage, in millivolts
+
+
 AVALON DEVICES
 
 Currently all known Avalon devices come with their own operating system and
@@ -90,6 +109,7 @@ Avalon commands:
 --avalon-freq <arg> Set frequency range for avalon-auto, single value or range
 --avalon-options <arg> Set avalon options baud:miners:asic:timeout:freq
 --avalon-temp <arg> Set avalon target temperature (default: 50)
+--bitburner-voltage <arg> Set BitBurner core voltage, in millivolts
 
 
 Avalon auto will enable dynamic overclocking gradually increasing and
@@ -149,6 +169,7 @@ to replace it. It should be changed according to the frequency (last setting).
 It is possible to set this a little lower if you are trying to tune for short
 block mining (eg p2pool) but much lower and the device will start creating
 duplicate shares.
+A value of 'd' means cgminer will calculate it for you based on the frequency
 
 Sample settings for valid different frequencies (last 2 values):
 34:375 *
@@ -166,6 +187,11 @@ This is the clock speed of the devices. Only specific values work, 256, 270,
 Note that setting a value with an asterisk next to it will be using your
 avalon outside its spec and you do so at your own risk.
 
+eg:
+--bitburner-voltage <arg> Set BitBurner core voltage, in millivolts
+
+Self evident.
+
 If you use the full curses based interface with Avalons you will get this
 information:
 AVA 0: 22/ 46C  2400R
@@ -174,6 +200,15 @@ The values are:
 ambient temp / highest device temp  lowest detected ASIC cooling fan RPM.
 
 Use the API for more detailed information than this.
+
+
+BFLSC Devices
+
+--bflsc-overheat <arg> Set overheat temperature where BFLSC devices throttle, 0 to disable (default: 90)
+
+This will allow you to change or disable the default temperature where cgminer
+throttles BFLSC devices by allowing them to temporarily go idle.
+
 
 ---
 

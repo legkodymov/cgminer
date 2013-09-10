@@ -52,7 +52,6 @@ extern bool have_opencl;
 
 extern void *miner_thread(void *userdata);
 extern int dev_from_id(int thr_id);
-extern void tailsprintf(char *f, const char *fmt, ...);
 extern void decay_time(double *f, double fadd);
 
 /**********************************************/
@@ -551,7 +550,7 @@ char *set_intensity(char *arg)
 	else {
 		gpus[device].dynamic = false;
 		val = atoi(nextptr);
-		if (val < MIN_INTENSITY || val > MAX_INTENSITY)
+		if (val < MIN_INTENSITY || val > MAX_GPU_INTENSITY)
 			return "Invalid value passed to set intensity";
 		tt = &gpus[device].intensity;
 		*tt = val;
@@ -565,7 +564,7 @@ char *set_intensity(char *arg)
 		else {
 			gpus[device].dynamic = false;
 			val = atoi(nextptr);
-			if (val < MIN_INTENSITY || val > MAX_INTENSITY)
+			if (val < MIN_INTENSITY || val > MAX_GPU_INTENSITY)
 				return "Invalid value passed to set intensity";
 
 			tt = &gpus[device].intensity;
@@ -667,24 +666,24 @@ retry:
 				if (temp != -1)
 					sprintf(logline, "%.1f C  ", temp);
 				if (fanspeed != -1 || fanpercent != -1) {
-					tailsprintf(logline, "F: ");
+					tailsprintf(logline, sizeof(logline), "F: ");
 					if (fanpercent != -1)
-						tailsprintf(logline, "%d%% ", fanpercent);
+						tailsprintf(logline, sizeof(logline), "%d%% ", fanpercent);
 					if (fanspeed != -1)
-						tailsprintf(logline, "(%d RPM) ", fanspeed);
-					tailsprintf(logline, " ");
+						tailsprintf(logline, sizeof(logline), "(%d RPM) ", fanspeed);
+					tailsprintf(logline, sizeof(logline), " ");
 				}
 				if (engineclock != -1)
-					tailsprintf(logline, "E: %d MHz  ", engineclock);
+					tailsprintf(logline, sizeof(logline), "E: %d MHz  ", engineclock);
 				if (memclock != -1)
-					tailsprintf(logline, "M: %d Mhz  ", memclock);
+					tailsprintf(logline, sizeof(logline), "M: %d Mhz  ", memclock);
 				if (vddc != -1)
-					tailsprintf(logline, "V: %.3fV  ", vddc);
+					tailsprintf(logline, sizeof(logline), "V: %.3fV  ", vddc);
 				if (activity != -1)
-					tailsprintf(logline, "A: %d%%  ", activity);
+					tailsprintf(logline, sizeof(logline), "A: %d%%  ", activity);
 				if (powertune != -1)
-					tailsprintf(logline, "P: %d%%", powertune);
-				tailsprintf(logline, "\n");
+					tailsprintf(logline, sizeof(logline), "P: %d%%", powertune);
+				tailsprintf(logline, sizeof(logline), "\n");
 				_wlog(logline);
 			}
 		}
@@ -699,7 +698,7 @@ retry:
 			thr = get_thread(i);
 			if (thr->cgpu != cgpu)
 				continue;
-			get_datestamp(checkin, &thr->last);
+			get_datestamp(checkin, sizeof(checkin), &thr->last);
 			displayed_rolling = thr->rolling;
 			if (!mhash_base)
 				displayed_rolling *= 1000;
@@ -790,7 +789,15 @@ retry:
 			wlogprint("Invalid selection\n");
 			goto retry;
 		}
-		intvar = curses_input("Set GPU scan intensity (d or " _MIN_INTENSITY_STR " -> " _MAX_INTENSITY_STR ")");
+		if (opt_scrypt) {
+			intvar = curses_input("Set GPU scan intensity (d or "
+					      MIN_SCRYPT_INTENSITY_STR " -> "
+					      MAX_SCRYPT_INTENSITY_STR ")");
+		} else {
+			intvar = curses_input("Set GPU scan intensity (d or "
+					      MIN_SHA_INTENSITY_STR " -> "
+					      MAX_SHA_INTENSITY_STR ")");
+		}
 		if (!intvar) {
 			wlogprint("Invalid input\n");
 			goto retry;
@@ -1198,7 +1205,7 @@ select_cgpu:
 	}
 
 	cgtime(&now);
-	get_datestamp(cgpu->init, &now);
+	get_datestamp(cgpu->init, sizeof(cgpu->init), &now);
 
 	for (thr_id = 0; thr_id < mining_threads; ++thr_id) {
 		thr = get_thread(thr_id);
@@ -1271,7 +1278,7 @@ static void reinit_opencl_device(struct cgpu_info *gpu)
 }
 
 #ifdef HAVE_ADL
-static void get_opencl_statline_before(char *buf, struct cgpu_info *gpu)
+static void get_opencl_statline_before(char *buf, size_t bufsiz, struct cgpu_info *gpu)
 {
 	if (gpu->has_adl) {
 		int gpuid = gpu->device_id;
@@ -1280,25 +1287,25 @@ static void get_opencl_statline_before(char *buf, struct cgpu_info *gpu)
 		int gp;
 
 		if (gt != -1)
-			tailsprintf(buf, "%5.1fC ", gt);
+			tailsprintf(buf, bufsiz, "%5.1fC ", gt);
 		else
-			tailsprintf(buf, "       ", gt);
+			tailsprintf(buf, bufsiz, "       ");
 		if (gf != -1)
 			// show invalid as 9999
-			tailsprintf(buf, "%4dRPM ", gf > 9999 ? 9999 : gf);
+			tailsprintf(buf, bufsiz, "%4dRPM ", gf > 9999 ? 9999 : gf);
 		else if ((gp = gpu_fanpercent(gpuid)) != -1)
-			tailsprintf(buf, "%3d%%    ", gp);
+			tailsprintf(buf, bufsiz, "%3d%%    ", gp);
 		else
-			tailsprintf(buf, "        ");
-		tailsprintf(buf, "| ");
+			tailsprintf(buf, bufsiz, "        ");
+		tailsprintf(buf, bufsiz, "| ");
 	} else
 		gpu->drv->get_statline_before = &blank_get_statline_before;
 }
 #endif
 
-static void get_opencl_statline(char *buf, struct cgpu_info *gpu)
+static void get_opencl_statline(char *buf, size_t bufsiz, struct cgpu_info *gpu)
 {
-	tailsprintf(buf, " I:%2d", gpu->intensity);
+	tailsprintf(buf, bufsiz, " I:%2d", gpu->intensity);
 }
 
 struct opencl_thread_data {
@@ -1383,7 +1390,7 @@ static bool opencl_thread_prepare(struct thr_info *thr)
 	}
 	applog(LOG_INFO, "initCl() finished. Found %s", name);
 	cgtime(&now);
-	get_datestamp(cgpu->init, &now);
+	get_datestamp(cgpu->init, sizeof(cgpu->init), &now);
 
 	have_opencl = true;
 

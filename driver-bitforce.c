@@ -199,7 +199,7 @@ reinit:
 				applog(LOG_WARNING, "%s detect (%s) 2nd init failed (%d:%d) - retrying",
 					bitforce->drv->dname, bitforce->device_path, amount, err);
 			}
-			nmsleep(init_sleep);
+			cgsleep_ms(init_sleep);
 			if ((init_sleep * 2) <= REINIT_TIME_MAX_MS)
 				init_sleep *= 2;
 			goto reinit;
@@ -294,24 +294,21 @@ static void bitforce_detect(void)
 	usb_detect(&bitforce_drv, bitforce_detect_one);
 }
 
-static void get_bitforce_statline_before(char *buf, struct cgpu_info *bitforce)
+static void get_bitforce_statline_before(char *buf, size_t bufsiz, struct cgpu_info *bitforce)
 {
 	float gt = bitforce->temp;
 
 	if (gt > 0)
-		tailsprintf(buf, "%5.1fC ", gt);
+		tailsprintf(buf, bufsiz, "%5.1fC ", gt);
 	else
-		tailsprintf(buf, "       ", gt);
-	tailsprintf(buf, "        | ");
+		tailsprintf(buf, bufsiz, "       ");
+
+	tailsprintf(buf, bufsiz, "        | ");
 }
 
-static bool bitforce_thread_prepare(struct thr_info *thr)
+static bool bitforce_thread_prepare(__maybe_unused struct thr_info *thr)
 {
-	struct cgpu_info *bitforce = thr->cgpu;
-	struct timeval now;
-
-	cgtime(&now);
-	get_datestamp(bitforce->init, &now);
+//	struct cgpu_info *bitforce = thr->cgpu;
 
 	return true;
 }
@@ -336,7 +333,7 @@ static void bitforce_flash_led(struct cgpu_info *bitforce)
 	} else {
 		/* However, this stops anything else getting a reply
 		 * So best to delay any other access to the BFL */
-		nmsleep(4000);
+		cgsleep_ms(4000);
 	}
 
 	/* Once we've tried - don't do it until told to again */
@@ -465,7 +462,7 @@ re_send:
 
 	if (amount == 0 || !buf[0] || !strncasecmp(buf, "B", 1)) {
 		mutex_unlock(&bitforce->device_mutex);
-		nmsleep(WORK_CHECK_INTERVAL_MS);
+		cgsleep_ms(WORK_CHECK_INTERVAL_MS);
 		goto re_send;
 	} else if (unlikely(strncasecmp(buf, "OK", 2))) {
 		mutex_unlock(&bitforce->device_mutex);
@@ -577,7 +574,7 @@ static int64_t bitforce_get_result(struct thr_info *thr, struct work *work)
 
 		/* if BFL is throttling, no point checking so quickly */
 		delay_time_ms = (buf[0] ? BITFORCE_CHECK_INTERVAL_MS : 2 * WORK_CHECK_INTERVAL_MS);
-		nmsleep(delay_time_ms);
+		cgsleep_ms(delay_time_ms);
 		bitforce->wait_ms += delay_time_ms;
 	}
 
@@ -681,7 +678,7 @@ static int64_t bitforce_scanhash(struct thr_info *thr, struct work *work, int64_
 
 	send_ret = bitforce_send_work(thr, work);
 
-	if (!restart_wait(bitforce->sleep_ms))
+	if (!restart_wait(thr, bitforce->sleep_ms))
 		return 0;
 
 	bitforce->wait_ms = bitforce->sleep_ms;
@@ -724,7 +721,7 @@ static bool bitforce_thread_init(struct thr_info *thr)
 	wait = thr->id * MAX_START_DELAY_MS;
 	applog(LOG_DEBUG, "%s%d: Delaying start by %dms",
 			bitforce->drv->name, bitforce->device_id, wait / 1000);
-	nmsleep(wait);
+	cgsleep_ms(wait);
 
 	return true;
 }

@@ -176,7 +176,7 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 
 	
 	shift_number++;
-	restart_wait(200);
+	cgsleep_ms(200);
 	return hashes;
 }
 
@@ -218,7 +218,7 @@ static bool bitfury_prepare(struct thr_info *thr)
 	struct cgpu_info *cgpu = thr->cgpu;
 
 	cgtime(&now);
-	get_datestamp(cgpu->init, &now);
+	get_datestamp(cgpu->init, sizeof(cgpu->init), &now);
 
 	applog(LOG_INFO, "INFO bitfury_prepare");
 	return true;

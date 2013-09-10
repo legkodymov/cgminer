@@ -78,20 +78,18 @@ If you specify the --socks-proxy option to cgminer, it will only be applied to a
 that don't specify their own proxy setting like above
 
 ---
-BUILDING CGMINER
+BUILDING CGMINER FOR YOURSELF
 
-Dependencies:
+DEPENDENCIES:
+Mandatory:
 	curl dev library 	http://curl.haxx.se/libcurl/
 	(libcurl4-openssl-dev)
 
-	curses dev library
-	(libncurses5-dev or libpdcurses on WIN32)
-
 	pkg-config		http://www.freedesktop.org/wiki/Software/pkg-config
 	libtool			http://www.gnu.org/software/libtool/
-
-	jansson			http://www.digip.org/jansson/
-	(jansson is included in-tree and not necessary)
+Optional:
+	curses dev library
+	(libncurses5-dev or libpdcurses on WIN32 for text user interface)
 
 	AMD APP SDK		http://developer.amd.com/sdks/AMDAPPSDK
 	(This sdk is mandatory for GPU mining)
@@ -99,11 +97,12 @@ Dependencies:
 	AMD ADL SDK		http://developer.amd.com/sdks/ADLSDK
 	(This sdk is mandatory for ATI GPU monitoring & clocking)
 
-	libudev headers
-	(This is only required for ASIC+FPGA auto-detection and is linux only)
+	libudev dev library (libudev-dev)
+	(This is only required for ASIC+FPGA support and is linux only)
 
-	libusb headers
-	(This is only required for ASIC+FPGA support)
+If building from git:
+	autoconf
+	automake
 
 
 CGMiner specific configuration options:
@@ -125,7 +124,8 @@ Basic *nix build instructions:
 	CFLAGS="-O2 -Wall -march=native" ./configure <options>
 
 	No installation is necessary. You may run cgminer from the build
-	directory directly.
+	directory directly, but you may do make install if you wish to install
+	cgminer to a system location or location you specified.
 
 Native WIN32 build instructions: see windows-build.txt
 
@@ -145,6 +145,11 @@ Options for both config file and command line:
                     By default any command that does not just display data returns access denied
                     See --api-allow to overcome this
 --api-network       Allow API (if enabled) to listen on/for any address (default: only 127.0.0.1)
+--api-mcast         Enable API Multicast listener, (default: disabled)
+                    The listener will only run if the API is also enabled
+--api-mcast-addr <arg> API Multicast listen address, (default: 224.0.0.75)
+--api-mcast-code <arg> Code expected in the API Multicast message, don't use '-' (default: "FTW")
+--api-mcast-port <arg> API Multicast listen port, (default: 4028)
 --api-port          Port number of miner API (default: 4028)
 --auto-fan          Automatically adjust all GPU fan speeds to maintain a target temperature
 --auto-gpu          Automatically adjust all GPU engine clock speeds to maintain a target temperature
@@ -195,6 +200,37 @@ See example.conf for an example configuration.
 --version|-V        Display version and exit
 
 
+USB device (ASIC and FPGA) options:
+
+--icarus-options <arg> Set specific FPGA board configurations - one set of values for all or comma separated
+--icarus-timing <arg> Set how the Icarus timing is calculated - one setting/value for all or comma separated
+--usb <arg>         USB device selection (See below)
+--usb-dump          (See FPGA-README)
+
+See FGPA-README or ASIC-README for more information regarding these.
+
+
+ASIC only options:
+
+--avalon-auto       Adjust avalon overclock frequency dynamically for best hashrate
+--avalon-fan <arg> Set fanspeed percentage for avalon, single value or range (default: 20-100)
+--avalon-freq <arg> Set frequency range for avalon-auto, single value or range
+--avalon-cutoff <arg> Set avalon overheat cut off temperature (default: 60)
+--avalon-options <arg> Set avalon options baud:miners:asic:timeout:freq
+--avalon-temp <arg> Set avalon target temperature (default: 50)
+--bflsc-overheat <arg> Set overheat temperature where BFLSC devices throttle, 0 to disable (default: 90)
+--bitburner-voltage <arg> Set BitBurner core voltage, in millivolts
+
+See ASIC-README for more information regarding these.
+
+
+FPGA only options:
+
+--bfl-range         Use nonce range on bitforce devices if supported
+
+See FGPA-README for more information regarding this.
+
+
 GPU only options:
 
 --auto-fan          Automatically adjust all GPU fan speeds to maintain a target temperature
@@ -222,6 +258,7 @@ GPU only options:
 
 See GPU-README for more information regarding GPU mining.
 
+
 SCRYPT only options:
 
 --lookup-gap <arg>  Set GPU lookup gap for scrypt mining, comma separated
@@ -230,22 +267,6 @@ SCRYPT only options:
 
 See SCRYPT-README for more information regarding litecoin mining.
 
-ASIC and FPGA mining boards (BFL ASIC, BitForce, Icarus, ModMiner, Ztex)
-only options:
-
---avalon-auto       Adjust avalon overclock frequency dynamically for best hashrate
---avalon-fan <arg> Set fanspeed percentage for avalon, single value or range (default: 20-100)
---avalon-freq <arg> Set frequency range for avalon-auto, single value or range
---avalon-cutoff <arg> Set avalon overheat cut off temperature (default: 60)
---avalon-options <arg> Set avalon options baud:miners:asic:timeout:freq
---avalon-temp <arg> Set avalon target temperature (default: 50)
---bfl-range         Use nonce range on bitforce devices if supported
---icarus-options <arg> Set specific FPGA board configurations - one set of values for all or comma separated
---icarus-timing <arg> Set how the Icarus timing is calculated - one setting/value for all or comma separated
---usb <arg>         USB device selection (See below)
---usb-dump          (See FPGA-README)
-
-See FGPA-README and ASIC-README for more information regarding these.
 
 Cgminer should automatically find all of your Avalon ASIC, BFL ASIC, BitForce
 FPGAs, Icarus bitstream FPGAs, ASICMINER usb block erupters, ModMiner FPGAs,
@@ -253,7 +274,7 @@ or Ztex FPGAs
 
 ---
 
-USB DEVICES
+SETTING UP USB DEVICES
 
 WINDOWS:
 
@@ -700,9 +721,7 @@ A: Stratum is a protocol designed for pooled mining in such a way as to
 minimise the amount of network communications, yet scale to hardware of any
 speed. With versions of cgminer 2.8.0+, if a pool has stratum support, cgminer
 will automatically detect it and switch to the support as advertised if it can.
-Stratum uses direct TCP connections to the pool and thus it will NOT currently
-work through a http proxy but will work via a socks proxy if you need to use
-one. If you input the stratum port directly into your configuration, or use the
+If you input the stratum port directly into your configuration, or use the
 special prefix "stratum+tcp://" instead of "http://", cgminer will ONLY try to
 use stratum protocol mining. The advantages of stratum to the miner are no
 delays in getting more work for the miner, less rejects across block changes,
@@ -735,11 +754,6 @@ A: The USB implementation on windows can be very flaky on some hardware and
 every time cgminer looks for new hardware to hotplug it it can cause these
 sorts of problems. You can disable hotplug with:
 --hotplug 0
-
-Q: Can I use a proxy?
-A: Proxies only work with the getwork and GBT protocols using the --proxy
-command. If you wish to use a proxy with stratum, people have supported
-success with various 3rd party tools like proxifier.
 
 Q: What should my Work Utility (WU) be?
 A: Work utility is the product of hashrate * luck and only stabilises over a

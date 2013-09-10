@@ -1,10 +1,12 @@
 
 ACLOCAL_AMFLAGS = -I m4
 
-if WANT_JANSSON
 JANSSON_INCLUDES= -I$(top_srcdir)/compat/jansson
+
+if WANT_USBUTILS
+USBUTILS_INCLUDES = -I$(top_srcdir)/compat/libusb-1.0/libusb
 else
-JANSSON_INCLUDES=
+USBUTILS_INCLUDES =
 endif
 
 EXTRA_DIST	= example.conf m4/gnulib-cache.m4 linux-usb-cgminer \
@@ -16,7 +18,7 @@ EXTRA_DIST	= example.conf m4/gnulib-cache.m4 linux-usb-cgminer \
 
 SUBDIRS		= lib compat ccan
 
-INCLUDES	= $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES)
+INCLUDES	= $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES) $(USBUTILS_INCLUDES)
 
 bin_PROGRAMS	= cgminer
 
@@ -25,13 +27,13 @@ bin_SCRIPTS	= $(top_srcdir)/*.cl
 cgminer_LDFLAGS	= $(PTHREAD_FLAGS)
 cgminer_LDADD	= $(DLOPEN_FLAGS) @LIBCURL_LIBS@ @JANSSON_LIBS@ @PTHREAD_LIBS@ \
 		  @OPENCL_LIBS@ @NCURSES_LIBS@ @PDCURSES_LIBS@ @WS2_LIBS@ \
-		  @LIBUSB_LIBS@ @MM_LIBS@ \
+		  @LIBUSB_LIBS@ @MM_LIBS@ @RT_LIBS@ \
 		  @MATH_LIBS@ lib/libgnu.a ccan/libccan.a
 
 if HAVE_WINDOWS
-cgminer_CPPFLAGS = -I$(top_builddir)/lib -I$(top_srcdir)/lib @OPENCL_FLAGS@ @LIBUSB_CFLAGS@
+cgminer_CPPFLAGS = -I$(top_builddir)/lib -I$(top_srcdir)/lib @OPENCL_FLAGS@
 else
-cgminer_CPPFLAGS = -I$(top_builddir)/lib -I$(top_srcdir)/lib @OPENCL_FLAGS@ @LIBUSB_CFLAGS@ @LIBCURL_CFLAGS@
+cgminer_CPPFLAGS = -I$(top_builddir)/lib -I$(top_srcdir)/lib @OPENCL_FLAGS@ @LIBCURL_CFLAGS@
 endif
 
 cgminer_CPPFLAGS += $(ADL_CPPFLAGS)
@@ -41,7 +43,7 @@ cgminer_SOURCES := cgminer.c
 
 cgminer_SOURCES	+= elist.h miner.h compat.h bench_block.h	\
 		   util.c util.h uthash.h logging.h		\
-		   sha2.c sha2.h api.c usbutils.h
+		   sha2.c sha2.h api.c
 
 cgminer_SOURCES	+= logging.c
 
@@ -62,12 +64,12 @@ if NEED_FPGAUTILS
 cgminer_SOURCES += fpgautils.c fpgautils.h
 endif
 
-if NEED_USBUTILS_C
-cgminer_SOURCES += usbutils.c
+if WANT_USBUTILS
+cgminer_SOURCES += usbutils.c usbutils.h
 endif
 
 if HAS_BFLSC
-cgminer_SOURCES += driver-bflsc.c
+cgminer_SOURCES += driver-bflsc.c driver-bflsc.h
 endif
 
 if HAS_BITFORCE

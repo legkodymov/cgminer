@@ -13,6 +13,8 @@
 
 #include <libusb.h>
 
+#include "util.h"
+
 #define EPI(x) (LIBUSB_ENDPOINT_IN | (unsigned char)(x))
 #define EPO(x) (LIBUSB_ENDPOINT_OUT | (unsigned char)(x))
 
@@ -47,6 +49,13 @@
 #define FTDI_INDEX_BAUD_AVA 0x0000
 
 #define FTDI_VALUE_DATA_AVA 8
+
+// BitBurner
+#define BITBURNER_REQUEST ((uint8_t)0x42)
+#define BITBURNER_VALUE 0x4242
+#define BITBURNER_INDEX_SET_VOLTAGE 1
+#define BITBURNER_INDEX_GET_VOLTAGE 2
+#define BITBURNER_INDEX_GET_VERSION 4
 
 // CMR = 115200 & 57600
 #define FTDI_VALUE_BAUD_CMR_115 0xc068
@@ -121,6 +130,7 @@ enum sub_ident {
 	IDENT_BFL,
 	IDENT_MMQ,
 	IDENT_AVA,
+	IDENT_BTB,
 	IDENT_ICA,
 	IDENT_AMU,
 	IDENT_BLT,
@@ -178,11 +188,26 @@ struct cg_usb_device {
 	uint32_t bufsiz;
 	uint32_t bufamt;
 	uint16_t PrefPacketSize;
-	struct timeval last_write_tv;
+	cgtimer_t cgt_last_write;
 	size_t last_write_siz;
 };
 
 #define USB_NOSTAT 0
+
+#define USB_MAX_READ 8192
+
+#define USB_TMO_0 50
+#define USB_TMO_1 100
+#define USB_TMO_2 500
+#define USB_TMOS 3
+
+struct cg_usb_tmo {
+	uint32_t count;
+	uint32_t min_tmo;
+	uint32_t max_tmo;
+	uint64_t total_over;
+	uint64_t total_tmo;
+};
 
 struct cg_usb_info {
 	uint8_t bus_number;
@@ -215,6 +240,16 @@ struct cg_usb_info {
 	double total_read_delay;
 	uint64_t write_delay_count;
 	double total_write_delay;
+
+	/*
+	 * We add 4: 1 for null, 2 for FTDI status and 1 to round to 4 bytes
+	 * If a single device ever has multiple end points then it will need
+	 * multiple of these
+	 */
+	unsigned char bulkbuf[USB_MAX_READ+4];
+
+	uint64_t tmo_count;
+	struct cg_usb_tmo usb_tmo[USB_TMOS];
 };
 
 enum usb_cmds {
@@ -279,6 +314,8 @@ enum usb_cmds {
 	C_GET_AVALON_RESET,
 	C_FTDI_STATUS,
 	C_ENABLE_UART,
+	C_BB_SET_VOLTAGE,
+	C_BB_GET_VOLTAGE,
 	C_MAX
 };
 

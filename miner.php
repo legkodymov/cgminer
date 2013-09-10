@@ -1,14 +1,19 @@
 <?php
 session_start();
 #
-global $title, $miner, $port, $readonly, $notify, $rigs;
+global $doctype, $title, $miner, $port, $readonly, $notify, $rigs;
+global $mcast, $mcastexpect, $mcastaddr, $mcastport, $mcastcode;
+global $mcastlistport, $mcasttimeout, $mcastretries, $allowgen;
 global $rigipsecurity, $rigtotals, $forcerigtotals;
 global $socksndtimeoutsec, $sockrcvtimeoutsec;
 global $checklastshare, $poolinputs, $hidefields;
 global $ignorerefresh, $changerefresh, $autorefresh;
 global $allowcustompages, $customsummarypages;
 global $miner_font_family, $miner_font_size;
+global $bad_font_family, $bad_font_size;
 global $colouroverride, $placebuttons, $userlist;
+#
+$doctype = "<!DOCTYPE html>\n";
 #
 # See API-README for more details of these variables and how
 # to configure miner.php
@@ -42,6 +47,35 @@ $poolinputs = false;
 # Set $rigs to an array of your cgminer rigs that are running
 #  format: 'IP:Port' or 'Host:Port' or 'Host:Port:Name'
 $rigs = array('127.0.0.1:4028');
+#
+# Set $mcast to true to look for your rigs and ignore $rigs
+$mcast = false;
+#
+# Set $mcastexpect to at least how many rigs you expect it to find
+$mcastexpect = 0;
+#
+# API Multicast address all cgminers are listening on
+$mcastaddr = '224.0.0.75';
+#
+# API Multicast UDP port all cgminers are listening on
+$mcastport = 4028;
+#
+# The code all cgminers expect in the Multicast message sent
+$mcastcode = 'FTW';
+#
+# UDP port cgminers are to reply on (by request)
+$mcastlistport = 4027;
+#
+# Set $mcasttimeout to the number of seconds (floating point)
+# to wait for replies to the Multicast message
+$mcasttimeout = 1.5;
+#
+# Set $mcastretries to the number of times to retry the multicast
+$mcastretries = 0;
+#
+# Set $allowgen to true to allow customsummarypages to use 'gen' 
+# false means ignore any 'gen' options
+$allowgen = false;
 #
 # Set $rigipsecurity to false to show the IP/Port of the rig
 # in the socket error messages and also show the full socket message
@@ -118,7 +152,7 @@ $poolspage = array(
 			'POOL.Has GBT=GBT', 'STATS.Times Sent=TSent',
 			'STATS.Bytes Sent=BSent', 'STATS.Net Bytes Sent=NSent',
 			'STATS.Times Recv=TRecv', 'STATS.Bytes Recv=BRecv',
-			'STATS.Net Bytes Recv=NRecv'));
+			'STATS.Net Bytes Recv=NRecv', 'GEN.AvShr=AvShr'));
 #
 $poolssum = array(
  'SUMMARY' => array('MHS av', 'Found Blocks', 'Accepted',
@@ -135,7 +169,9 @@ $poolsext = array(
 	'calc' => array('POOL.Difficulty Accepted' => 'sum', 'POOL.Difficulty Rejected' => 'sum',
 			'STATS.Times Sent' => 'sum', 'STATS.Bytes Sent' => 'sum',
 			'STATS.Net Bytes Sent' => 'sum', 'STATS.Times Recv' => 'sum',
-			'STATS.Bytes Recv' => 'sum', 'STATS.Net Bytes Recv' => 'sum'),
+			'STATS.Bytes Recv' => 'sum', 'STATS.Net Bytes Recv' => 'sum',
+			'POOL.Accepted' => 'sum'),
+	'gen' => array('AvShr' => 'round(POOL.Difficulty Accepted/max(POOL.Accepted,1)*100)/100'),
 	'having' => array(array('STATS.Bytes Recv', '>', 0)))
 );
 
@@ -155,8 +191,11 @@ $warnfont = '<font color=red><b>';
 $warnoff = '</b></font>';
 $dfmt = 'H:i:s j-M-Y \U\T\CP';
 #
-$miner_font_family = 'verdana,arial,sans';
+$miner_font_family = 'Verdana, Arial, sans-serif, sans';
 $miner_font_size = '13pt';
+#
+$bad_font_family = '"Times New Roman", Times, serif';
+$bad_font_size = '18pt';
 #
 # Edit this or redefine it in myminer.php to change the colour scheme
 # See $colourtable below for the list of names
@@ -177,7 +216,7 @@ if (file_exists('myminer.php'))
 # This is the system default that must always contain all necessary
 # colours so it must be a constant
 # You can override these values with $colouroverride
-# The only one missing is in $warnfont
+# The only one missing is $warnfont
 # - which you can override directly anyway
 global $colourtable;
 $colourtable = array(
@@ -189,6 +228,8 @@ $colourtable = array(
 	'td.h background'	=> '#c4ffff',
 	'td.err color'		=> 'black',
 	'td.err background'	=> '#ff3050',
+	'td.bad color'		=> 'black',
+	'td.bad background'	=> '#ff3050',
 	'td.warn color'		=> 'black',
 	'td.warn background'	=> '#ffb050',
 	'td.sta color'		=> 'green',
@@ -248,9 +289,10 @@ function getdom($domname)
  return getcss($domname, true);
 }
 #
-function htmlhead($checkapi, $rig, $pg = null, $noscript = false)
+function htmlhead($mcerr, $checkapi, $rig, $pg = null, $noscript = false)
 {
- global $title, $miner_font_family, $miner_font_size;
+ global $doctype, $title, $miner_font_family, $miner_font_size;
+ global $bad_font_family, $bad_font_size;
  global $error, $readonly, $poolinputs, $here;
  global $ignorerefresh, $autorefresh;
 
@@ -279,14 +321,16 @@ function htmlhead($checkapi, $rig, $pg = null, $noscript = false)
 		$readonly = true;
  }
  $miner_font = "font-family:$miner_font_family; font-size:$miner_font_size;";
+ $bad_font = "font-family:$bad_font_family; font-size:$bad_font_size;";
 
- echo "<html><head>$refreshmeta
+ echo "$doctype<html><head>$refreshmeta
 <title>$title</title>
 <style type='text/css'>
 td { $miner_font ".getcss('td')."}
 td.two { $miner_font ".getcss('td.two')."}
 td.h { $miner_font ".getcss('td.h')."}
 td.err { $miner_font ".getcss('td.err')."}
+td.bad { $bad_font ".getcss('td.bad')."}
 td.warn { $miner_font ".getcss('td.warn')."}
 td.sta { $miner_font ".getcss('td.sta')."}
 td.tot { $miner_font ".getcss('td.tot')."}
@@ -318,11 +362,132 @@ echo "</script>\n";
 <tr><td align=center valign=top>
 <table border=0 cellpadding=4 cellspacing=0 summary='Mine'>
 <?php
+ echo $mcerr;
+}
+#
+function minhead($mcerr = '')
+{
+ global $readonly;
+ $readonly = true;
+ htmlhead($mcerr, false, null, null, true);
 }
 #
 global $haderror, $error;
 $haderror = false;
 $error = null;
+#
+function mcastrigs()
+{
+ global $rigs, $mcastexpect, $mcastaddr, $mcastport, $mcastcode;
+ global $mcastlistport, $mcasttimeout, $mcastretries, $error;
+
+ $listname = "0.0.0.0";
+
+ $rigs = array();
+
+ $rep_soc = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+ if ($rep_soc === false || $rep_soc == null)
+ {
+	$msg = "ERR: mcast listen socket create(UDP) failed";
+	if ($rigipsecurity === false)
+	{
+		$error = socket_strerror(socket_last_error());
+		$error = "$msg '$error'\n";
+	}
+	else
+		$error = "$msg\n";
+
+	return;
+ }
+
+ $res = socket_bind($rep_soc, $listname, $mcastlistport);
+ if ($res === false)
+ {
+	$msg1 = "ERR: mcast listen socket bind(";
+	$msg2 = ") failed";
+	if ($rigipsecurity === false)
+	{
+		$error = socket_strerror(socket_last_error());
+		$error = "$msg1$listname,$mcastlistport$msg2 '$error'\n";
+	}
+	else
+		$error = "$msg1$msg2\n";
+
+	socket_close($rep_soc);
+	return;
+ }
+
+ $retries = $mcastretries;
+ $doretry = ($retries > 0);
+ do
+ {
+	$mcast_soc = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+	if ($mcast_soc === false || $mcast_soc == null)
+	{
+		$msg = "ERR: mcast send socket create(UDP) failed";
+		if ($rigipsecurity === false)
+		{
+			$error = socket_strerror(socket_last_error());
+			$error = "$msg '$error'\n";
+		}
+		else
+			$error = "$msg\n";
+
+		socket_close($rep_soc);
+		return;
+	}
+
+	$buf = "cgminer-$mcastcode-$mcastlistport";
+	socket_sendto($mcast_soc, $buf, strlen($buf), 0, $mcastaddr, $mcastport);
+	socket_close($mcast_soc);
+
+	$stt = microtime(true);
+	while (true)
+	{
+		$got = @socket_recvfrom($rep_soc, $buf, 32, MSG_DONTWAIT, $ip, $p);
+		if ($got !== false && $got > 0)
+		{
+			$ans = explode('-', $buf, 4);
+			if (count($ans) >= 3 && $ans[0] == 'cgm' && $ans[1] == 'FTW')
+			{
+				$rp = intval($ans[2]);
+
+				if (count($ans) > 3)
+					$mdes = str_replace("\0", '', $ans[3]);
+				else
+					$mdes = '';
+
+				if (strlen($mdes) > 0)
+					$rig = "$ip:$rp:$mdes";
+				else
+					$rig = "$ip:$rp";
+
+				if (!in_array($rig, $rigs))
+					$rigs[] = $rig;
+			}
+		}
+		if ((microtime(true) - $stt) >= $mcasttimeout)
+			break;
+
+		usleep(100000);
+	}
+
+	if ($mcastexpect > 0 && count($rigs) >= $mcastexpect)
+		$doretry = false;
+
+ } while ($doretry && --$retries > 0);
+
+ socket_close($rep_soc);
+}
+#
+function getrigs()
+{
+ global $rigs;
+
+ mcastrigs();
+
+ sort($rigs);
+}
 #
 function getsock($rig, $addr, $port)
 {
@@ -531,9 +696,14 @@ function newrow()
  echo '<tr>';
 }
 #
+function othrow($row)
+{
+ return "<tr>$row</tr>";
+}
+#
 function otherrow($row)
 {
- echo "<tr>$row</tr>";
+ echo othrow($row);
 }
 #
 function endrow()
@@ -764,7 +934,11 @@ function fmt($section, $name, $value, $when, $alldata)
 	case 'DEVS.Temperature':
 		$ret = $value.'&deg;C';
 		if (!isset($alldata['GPU']))
+		{
+			if ($value == 0)
+				$ret = '&nbsp;';
 			break;
+		}
 	case 'GPU.GPU Clock':
 	case 'DEVS.GPU Clock':
 	case 'GPU.Memory Clock':
@@ -961,6 +1135,27 @@ function fmt($section, $name, $value, $when, $alldata)
 	case 'POOL.Last Share Difficulty':
 		if ($value != '')
 			$ret = number_format((float)$value, 2);
+		break;
+	case 'DEVS.Device Hardware%':
+	case 'DEVS.Device Rejected%':
+	case 'ASC.Device Hardware%':
+	case 'ASC.Device Rejected%':
+	case 'PGA.Device Hardware%':
+	case 'PGA.Device Rejected%':
+	case 'GPU.Device Hardware%':
+	case 'GPU.Device Rejected%':
+	case 'POOL.Pool Rejected%':
+	case 'POOL.Pool Stale%':
+	case 'SUMMARY.Device Hardware%':
+	case 'SUMMARY.Device Rejected%':
+	case 'SUMMARY.Pool Rejected%':
+	case 'SUMMARY.Pool Stale%':
+		if ($value != '')
+			$ret = number_format((float)$value, 2) . '%';
+		break;
+	case 'SUMMARY.Best Share':
+		if ($value != '')
+			$ret = number_format((float)$value);
 		break;
 	}
 
@@ -1673,8 +1868,6 @@ function doOne($rig, $preprocess)
  global $haderror, $readonly, $notify, $rigs;
  global $placebuttons;
 
- htmlhead(true, $rig);
-
  if ($placebuttons == 'top' || $placebuttons == 'both')
 	pagebuttons($rig, null);
 
@@ -2187,8 +2380,55 @@ function processcompare($which, $ext, $section, $res)
  return $res;
 }
 #
-function processext($ext, $section, $res)
+function ss($a, $b)
 {
+ $la = strlen($a);
+ $lb = strlen($b);
+ if ($la != $lb)
+	return $la - $lb;
+ return strcmp($a, $b);
+}
+#
+function genfld($row, $calc)
+{
+ uksort($row, "ss");
+
+ foreach ($row as $name => $value)
+	if (strstr($calc, $name) !== FALSE)
+		$calc = str_replace($name, $value, $calc);
+
+ eval("\$val = $calc;");
+
+ return $val;
+}
+#
+function dogen($ext, $section, &$res, &$fields)
+{
+ $gen = $ext[$section]['gen'];
+
+ foreach ($gen as $fld => $calc)
+	$fields[] = "GEN.$fld";
+
+ foreach ($res as $rig => $result)
+	foreach ($result as $sec => $row)
+	{
+		$secname = preg_replace('/\d/', '', $sec);
+		if (secmatch($section, $secname))
+			foreach ($gen as $fld => $calc)
+			{
+				$name = "GEN.$fld";
+
+				$val = genfld($row, $calc);
+
+				$res[$rig][$sec][$name] = $val;
+			}
+	}
+}
+#
+function processext($ext, $section, $res, &$fields)
+{
+ global $allowgen;
+
  $res = processcompare('where', $ext, $section, $res);
 
  if (isset($ext[$section]['group']))
@@ -2256,6 +2496,10 @@ function processext($ext, $section, $res)
 	}
  }
 
+ // Generated fields (functions of other fields)
+ if ($allowgen === true && isset($ext[$section]['gen']))
+	dogen($ext, $section, $res, $fields);
+
  return processcompare('having', $ext, $section, $res);
 }
 #
@@ -2314,6 +2558,8 @@ function processcustompage($pagename, $sections, $sum, $ext, $namemap)
 				$results[$cmd][$num] = $process;
 		}
 	}
+	else
+		otherrow('<td class=bad>Bad "$rigs" array</td>');
  }
 
  $shownsomething = false;
@@ -2350,7 +2596,8 @@ function processcustompage($pagename, $sections, $sum, $ext, $namemap)
 
 		if (isset($results[$sectionmap[$section]]))
 		{
-			$rigresults = processext($ext, $section, $results[$sectionmap[$section]]);
+			$rigresults = processext($ext, $section, $results[$sectionmap[$section]], $fields);
+
 			$showfields = array();
 			$showhead = array();
 			foreach ($fields as $field)
@@ -2429,21 +2676,19 @@ function showcustompage($pagename)
  global $customsummarypages;
  global $placebuttons;
 
- htmlhead(false, null, $pagename);
-
  if ($placebuttons == 'top' || $placebuttons == 'both')
 	pagebuttons(null, $pagename);
 
  if (!isset($customsummarypages[$pagename]))
  {
-	otherrow("<td colspan=100>Unknown custom summary page '$pagename'</td>");
+	otherrow("<td colspan=100 class=bad>Unknown custom summary page '$pagename'</td>");
 	return;
  }
 
  $c = count($customsummarypages[$pagename]);
  if ($c < 2 || $c > 3)
  {
-	$rw = "<td colspan=100>Invalid custom summary page '$pagename' (";
+	$rw = "<td colspan=100 class=bad>Invalid custom summary page '$pagename' (";
 	$rw .= count($customsummarypages[$pagename]).')</td>';
 	otherrow($rw);
 	return;
@@ -2488,7 +2733,7 @@ function showcustompage($pagename)
 
  if (count($page) <= 1)
  {
-	otherrow("<td colspan=100>Invalid custom summary page '$pagename' no content </td>");
+	otherrow("<td colspan=100 class=bad>Invalid custom summary page '$pagename' no content </td>");
 	return;
  }
 
@@ -2502,7 +2747,7 @@ function onlylogin()
 {
  global $here;
 
- htmlhead(false, null, null, true);
+ htmlhead('', false, null, null, true);
 
 ?>
 <tr height=15%><td>&nbsp;</td></tr>
@@ -2602,6 +2847,7 @@ function checklogin()
 function display()
 {
  global $miner, $port;
+ global $mcast, $mcastexpect;
  global $readonly, $notify, $rigs;
  global $ignorerefresh, $autorefresh;
  global $allowcustompages, $customsummarypages;
@@ -2613,10 +2859,23 @@ function display()
  if ($pagesonly === 'login')
 	return;
 
+ $mcerr = '';
+
  if ($rigs == null or count($rigs) == 0)
  {
-	otherrow("<td>No rigs defined</td>");
+	if ($mcast === true)
+		$action = 'found';
+	else
+		$action = 'defined';
+
+	minhead();
+	otherrow("<td class=bad>No rigs $action</td>");
 	return;
+ }
+ else
+ {
+	if ($mcast === true && count($rigs) < $mcastexpect)
+		$mcerr = othrow('<td class=bad>Found '.count($rigs)." rigs but expected at least $mcastexpect</td>");
  }
 
  if ($ignorerefresh == false)
@@ -2674,7 +2933,8 @@ function display()
 
 	if ($pg !== null && $pg !== '')
 	{
-		showcustompage($pg);
+		htmlhead($mcerr, false, null, $pg);
+		showcustompage($pg, $mcerr);
 		return;
 	}
  }
@@ -2693,10 +2953,14 @@ function display()
 		$miner = $parts[0];
 		$port = $parts[1];
 
+		htmlhead($mcerr, true, 0);
 		doOne(0, $preprocess);
 	}
 	else
-		otherrow('<td>Invalid "$rigs" array</td>');
+	{
+		minhead($mcerr);
+		otherrow('<td class=bad>Invalid "$rigs" array</td>');
+	}
 
 	return;
  }
@@ -2709,15 +2973,19 @@ function display()
 		$miner = $parts[0];
 		$port = $parts[1];
 
+		htmlhead($mcerr, true, 0);
 		doOne($rig, $preprocess);
 	}
 	else
-		otherrow('<td>Invalid "$rigs" array</td>');
+	{
+		minhead($mcerr);
+		otherrow('<td class=bad>Invalid "$rigs" array</td>');
+	}
 
 	return;
  }
 
- htmlhead(false, null);
+ htmlhead($mcerr, false, null);
 
  if ($placebuttons == 'top' || $placebuttons == 'both')
 	pagebuttons(null, null);
@@ -2743,6 +3011,8 @@ function display()
 	pagebuttons(null, null);
 }
 #
+if ($mcast === true)
+ getrigs();
 display();
 #
 ?>

@@ -126,6 +126,7 @@ char *WSAErrorMsg(void) {
 #endif
 
 static const char *UNAVAILABLE = " - API will not be available";
+static const char *MUNAVAILABLE = " - API multicast listener will not be available";
 
 static const char *BLANK = "";
 static const char *COMMA = ",";
@@ -134,7 +135,7 @@ static const char SEPARATOR = '|';
 #define SEPSTR "|"
 static const char GPUSEP = ',';
 
-static const char *APIVERSION = "1.26";
+static const char *APIVERSION = "1.29";
 static const char *DEAD = "Dead";
 #if defined(HAVE_OPENCL) || defined(HAVE_AN_FPGA) || defined(HAVE_AN_ASIC)
 static const char *SICK = "Sick";
@@ -413,6 +414,14 @@ static const char *JSON_PARAMETER = "parameter";
 #endif
 #define MSG_ASCUSBNODEV 115
 
+#ifdef HAVE_AN_ASIC
+#define MSG_MISASCOPT 116
+#define MSG_ASCNOSET 117
+#define MSG_ASCHELP 118
+#define MSG_ASCSETOK 119
+#define MSG_ASCSETERR 120
+#endif
+
 enum code_severity {
 	SEVERITY_ERR,
 	SEVERITY_WARN,
@@ -524,7 +533,7 @@ struct CODES {
  { SEVERITY_ERR,   MSG_MISVAL,	PARAM_NONE,	"Missing comma after GPU number" },
  { SEVERITY_ERR,   MSG_NOADL,	PARAM_NONE,	"ADL is not available" },
  { SEVERITY_ERR,   MSG_NOGPUADL,PARAM_GPU,	"GPU %d does not have ADL" },
- { SEVERITY_ERR,   MSG_INVINT,	PARAM_STR,	"Invalid intensity (%s) - must be '" _DYNAMIC  "' or range " _MIN_INTENSITY_STR " - " _MAX_INTENSITY_STR },
+ { SEVERITY_ERR,   MSG_INVINT,	PARAM_STR,	"Invalid intensity (%s) - must be '" _DYNAMIC  "' or range " MIN_SHA_INTENSITY_STR " - " MAX_SCRYPT_INTENSITY_STR },
  { SEVERITY_INFO,  MSG_GPUINT,	PARAM_BOTH,	"GPU %d set new intensity to %s" },
  { SEVERITY_SUCC,  MSG_MINECONFIG,PARAM_NONE,	"CGMiner config" },
 #ifdef HAVE_OPENCL
@@ -608,9 +617,16 @@ struct CODES {
  { SEVERITY_ERR,   MSG_ASCUNW,	PARAM_ASC,	"ASC %d is not flagged WELL, cannot enable" },
  { SEVERITY_SUCC,  MSG_ASCIDENT,PARAM_ASC,	"Identify command sent to ASC%d" },
  { SEVERITY_WARN,  MSG_ASCNOID,	PARAM_ASC,	"ASC%d does not support identify" },
+ { SEVERITY_ERR,   MSG_MISASCOPT, PARAM_NONE,	"Missing option after ASC number" },
+ { SEVERITY_WARN,  MSG_ASCNOSET, PARAM_ASC,	"ASC %d does not support pgaset" },
+ { SEVERITY_INFO,  MSG_ASCHELP, PARAM_BOTH,	"ASC %d set help: %s" },
+ { SEVERITY_SUCC,  MSG_ASCSETOK, PARAM_BOTH,	"ASC %d set OK" },
+ { SEVERITY_ERR,   MSG_ASCSETERR, PARAM_BOTH,	"ASC %d set failed: %s" },
 #endif
  { SEVERITY_FAIL, 0, 0, NULL }
 };
+
+static const char *localaddr = "127.0.0.1";
 
 static int my_thr_id = 0;
 static bool bye;
@@ -925,6 +941,7 @@ static struct api_data *api_add_data_full(struct api_data *root, char *name, enu
 			case API_FREQ:
 			case API_HS:
 			case API_DIFF:
+			case API_PERCENT:
 				api_data->data = (void *)malloc(sizeof(double));
 				*((double *)(api_data->data)) = *((double *)data);
 				break;
@@ -1056,6 +1073,11 @@ struct api_data *api_add_diff(struct api_data *root, char *name, double *data, b
 	return api_add_data_full(root, name, API_DIFF, (void *)data, copy_data);
 }
 
+struct api_data *api_add_percent(struct api_data *root, char *name, double *data, bool copy_data)
+{
+	return api_add_data_full(root, name, API_PERCENT, (void *)data, copy_data);
+}
+
 static struct api_data *print_data(struct api_data *root, char *buf, bool isjson, bool precom)
 {
 	struct api_data *tmp;
@@ -1147,6 +1169,9 @@ static struct api_data *print_data(struct api_data *root, char *buf, bool isjson
 				break;
 			case API_TEMP:
 				sprintf(buf, "%.2f", *((float *)(root->data)));
+				break;
+			case API_PERCENT:
+				sprintf(buf, "%.4f", *((double *)(root->data)) * 100.0);
 				break;
 			default:
 				applog(LOG_ERR, "API: unknown2 data type %d ignored", root->type);
@@ -1605,6 +1630,12 @@ static void gpustatus(struct io_data *io_data, int gpu, bool isjson, bool precom
 		root = api_add_diff(root, "Difficulty Rejected", &(cgpu->diff_rejected), false);
 		root = api_add_diff(root, "Last Share Difficulty", &(cgpu->last_share_diff), false);
 		root = api_add_time(root, "Last Valid Work", &(cgpu->last_device_valid_work), false);
+		double hwp = (cgpu->hw_errors + cgpu->diff1) ?
+				(double)(cgpu->hw_errors) / (double)(cgpu->hw_errors + cgpu->diff1) : 0;
+		root = api_add_percent(root, "Device Hardware%", &hwp, false);
+		double rejp = cgpu->diff1 ?
+				(double)(cgpu->diff_rejected) / (double)(cgpu->diff1) : 0;
+		root = api_add_percent(root, "Device Rejected%", &rejp, false);
 
 		root = print_data(root, buf, isjson, precom);
 		io_add(io_data, buf);
@@ -1678,6 +1709,12 @@ static void ascstatus(struct io_data *io_data, int asc, bool isjson, bool precom
 		root = api_add_bool(root, "No Device", &(cgpu->usbinfo.nodev), false);
 #endif
 		root = api_add_time(root, "Last Valid Work", &(cgpu->last_device_valid_work), false);
+		double hwp = (cgpu->hw_errors + cgpu->diff1) ?
+				(double)(cgpu->hw_errors) / (double)(cgpu->hw_errors + cgpu->diff1) : 0;
+		root = api_add_percent(root, "Device Hardware%", &hwp, false);
+		double rejp = cgpu->diff1 ?
+				(double)(cgpu->diff_rejected) / (double)(cgpu->diff1) : 0;
+		root = api_add_percent(root, "Device Rejected%", &rejp, false);
 
 		root = print_data(root, buf, isjson, precom);
 		io_add(io_data, buf);
@@ -1762,6 +1799,12 @@ static void pgastatus(struct io_data *io_data, int pga, bool isjson, bool precom
 		root = api_add_bool(root, "No Device", &(cgpu->usbinfo.nodev), false);
 #endif
 		root = api_add_time(root, "Last Valid Work", &(cgpu->last_device_valid_work), false);
+		double hwp = (cgpu->hw_errors + cgpu->diff1) ?
+				(double)(cgpu->hw_errors) / (double)(cgpu->hw_errors + cgpu->diff1) : 0;
+		root = api_add_percent(root, "Device Hardware%", &hwp, false);
+		double rejp = cgpu->diff1 ?
+				(double)(cgpu->diff_rejected) / (double)(cgpu->diff1) : 0;
+		root = api_add_percent(root, "Device Rejected%", &rejp, false);
 
 		root = print_data(root, buf, isjson, precom);
 		io_add(io_data, buf);
@@ -2132,6 +2175,12 @@ static void poolstatus(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __m
 			root = api_add_const(root, "Stratum URL", BLANK, false);
 		root = api_add_bool(root, "Has GBT", &(pool->has_gbt), false);
 		root = api_add_uint64(root, "Best Share", &(pool->best_diff), true);
+		double rejp = (pool->diff_accepted + pool->diff_rejected + pool->diff_stale) ?
+				(double)(pool->diff_rejected) / (double)(pool->diff_accepted + pool->diff_rejected + pool->diff_stale) : 0;
+		root = api_add_percent(root, "Pool Rejected%", &rejp, false);
+		double stalep = (pool->diff_accepted + pool->diff_rejected + pool->diff_stale) ?
+				(double)(pool->diff_stale) / (double)(pool->diff_accepted + pool->diff_rejected + pool->diff_stale) : 0;
+		root = api_add_percent(root, "Pool Stale%", &stalep, false);
 
 		root = print_data(root, buf, isjson, isjson && (i > 0));
 		io_add(io_data, buf);
@@ -2178,6 +2227,18 @@ static void summary(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __mayb
 	root = api_add_diff(root, "Difficulty Rejected", &(total_diff_rejected), true);
 	root = api_add_diff(root, "Difficulty Stale", &(total_diff_stale), true);
 	root = api_add_uint64(root, "Best Share", &(best_diff), true);
+	double hwp = (hw_errors + total_diff1) ?
+			(double)(hw_errors) / (double)(hw_errors + total_diff1) : 0;
+	root = api_add_percent(root, "Device Hardware%", &hwp, false);
+	double rejp = total_diff1 ?
+			(double)(total_diff_rejected) / (double)(total_diff1) : 0;
+	root = api_add_percent(root, "Device Rejected%", &rejp, false);
+	double prejp = (total_diff_accepted + total_diff_rejected + total_diff_stale) ?
+			(double)(total_diff_rejected) / (double)(total_diff_accepted + total_diff_rejected + total_diff_stale) : 0;
+	root = api_add_percent(root, "Pool Rejected%", &prejp, false);
+	double stalep = (total_diff_accepted + total_diff_rejected + total_diff_stale) ?
+			(double)(total_diff_stale) / (double)(total_diff_accepted + total_diff_rejected + total_diff_stale) : 0;
+	root = api_add_percent(root, "Pool Stale%", &stalep, false);
 
 	mutex_unlock(&hash_lock);
 
@@ -3023,7 +3084,7 @@ static int itemstats(struct io_data *io_data, int i, char *id, struct cgminer_st
 
 	if (cgpu) {
 #ifdef USE_USBUTILS
-		char details[128];
+		char details[256];
 
 		if (cgpu->usbinfo.pipe_count)
 			snprintf(details, sizeof(details),
@@ -3046,6 +3107,36 @@ static int itemstats(struct io_data *io_data, int i, char *id, struct cgminer_st
 			 cgpu->usbinfo.total_write_delay);
 
 		root = api_add_string(root, "USB Delay", details, true);
+
+		if (cgpu->usbinfo.usb_tmo[0].count == 0 &&
+			cgpu->usbinfo.usb_tmo[1].count == 0 &&
+			cgpu->usbinfo.usb_tmo[2].count == 0) {
+				snprintf(details, sizeof(details),
+					 "%"PRIu64" 0", cgpu->usbinfo.tmo_count);
+		} else {
+			snprintf(details, sizeof(details),
+				 "%"PRIu64" %d=%d/%d/%d/%"PRIu64"/%"PRIu64
+				 " %d=%d/%d/%d/%"PRIu64"/%"PRIu64
+				 " %d=%d/%d/%d/%"PRIu64"/%"PRIu64" ",
+				 cgpu->usbinfo.tmo_count,
+				 USB_TMO_0, cgpu->usbinfo.usb_tmo[0].count,
+				 cgpu->usbinfo.usb_tmo[0].min_tmo,
+				 cgpu->usbinfo.usb_tmo[0].max_tmo,
+				 cgpu->usbinfo.usb_tmo[0].total_over,
+				 cgpu->usbinfo.usb_tmo[0].total_tmo,
+				 USB_TMO_1, cgpu->usbinfo.usb_tmo[1].count,
+				 cgpu->usbinfo.usb_tmo[1].min_tmo,
+				 cgpu->usbinfo.usb_tmo[1].max_tmo,
+				 cgpu->usbinfo.usb_tmo[1].total_over,
+				 cgpu->usbinfo.usb_tmo[1].total_tmo,
+				 USB_TMO_2, cgpu->usbinfo.usb_tmo[2].count,
+				 cgpu->usbinfo.usb_tmo[2].min_tmo,
+				 cgpu->usbinfo.usb_tmo[2].max_tmo,
+				 cgpu->usbinfo.usb_tmo[2].total_over,
+				 cgpu->usbinfo.usb_tmo[2].total_tmo);
+		}
+
+		root = api_add_string(root, "USB tmo", details, true);
 #endif
 	}
 
@@ -3651,6 +3742,66 @@ static void asccount(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __may
 		io_close(io_data);
 }
 
+#ifdef HAVE_AN_ASIC
+static void ascset(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __maybe_unused char *param, bool isjson, __maybe_unused char group)
+{
+	struct cgpu_info *cgpu;
+	struct device_drv *drv;
+	char buf[TMPBUFSIZ];
+	int numasc = numascs();
+
+	if (numasc == 0) {
+		message(io_data, MSG_ASCNON, 0, NULL, isjson);
+		return;
+	}
+
+	if (param == NULL || *param == '\0') {
+		message(io_data, MSG_MISID, 0, NULL, isjson);
+		return;
+	}
+
+	char *opt = strchr(param, ',');
+	if (opt)
+		*(opt++) = '\0';
+	if (!opt || !*opt) {
+		message(io_data, MSG_MISASCOPT, 0, NULL, isjson);
+		return;
+	}
+
+	int id = atoi(param);
+	if (id < 0 || id >= numasc) {
+		message(io_data, MSG_INVASC, id, NULL, isjson);
+		return;
+	}
+
+	int dev = ascdevice(id);
+	if (dev < 0) { // Should never happen
+		message(io_data, MSG_INVASC, id, NULL, isjson);
+		return;
+	}
+
+	cgpu = get_devices(dev);
+	drv = cgpu->drv;
+
+	char *set = strchr(opt, ',');
+	if (set)
+		*(set++) = '\0';
+
+	if (!drv->set_device)
+		message(io_data, MSG_ASCNOSET, id, NULL, isjson);
+	else {
+		char *ret = drv->set_device(cgpu, opt, set, buf);
+		if (ret) {
+			if (strcasecmp(opt, "help") == 0)
+				message(io_data, MSG_ASCHELP, id, ret, isjson);
+			else
+				message(io_data, MSG_ASCSETERR, id, ret, isjson);
+		} else
+			message(io_data, MSG_ASCSETOK, id, NULL, isjson);
+	}
+}
+#endif
+
 static void checkcommand(struct io_data *io_data, __maybe_unused SOCKETTYPE c, char *param, bool isjson, char group);
 
 struct CMDS {
@@ -3713,6 +3864,7 @@ struct CMDS {
 	{ "ascenable",		ascenable,	true },
 	{ "ascdisable",		ascdisable,	true },
 	{ "ascidentify",	ascidentify,	true },
+	{ "ascset",		ascset,		true },
 #endif
 	{ "asccount",		asccount,	false },
 	{ NULL,			NULL,		false }
@@ -4110,13 +4262,206 @@ static void *restart_thread(__maybe_unused void *userdata)
 	return NULL;
 }
 
+static bool check_connect(struct sockaddr_in *cli, char **connectaddr, char *group)
+{
+	bool addrok = false;
+	int i;
+
+	*connectaddr = inet_ntoa(cli->sin_addr);
+
+	*group = NOPRIVGROUP;
+	if (opt_api_allow) {
+		int client_ip = htonl(cli->sin_addr.s_addr);
+		for (i = 0; i < ips; i++) {
+			if ((client_ip & ipaccess[i].mask) == ipaccess[i].ip) {
+				addrok = true;
+				*group = ipaccess[i].group;
+				break;
+			}
+		}
+	} else {
+		if (opt_api_network)
+			addrok = true;
+		else
+			addrok = (strcmp(*connectaddr, localaddr) == 0);
+	}
+
+	return addrok;
+}
+
+static void mcast()
+{
+	struct sockaddr_in listen;
+	struct ip_mreq grp;
+	struct sockaddr_in came_from;
+	time_t bindstart;
+	char *binderror;
+	SOCKETTYPE mcast_sock;
+	SOCKETTYPE reply_sock;
+	socklen_t came_from_siz;
+	char *connectaddr;
+	ssize_t rep;
+	int bound;
+	int count;
+	int reply_port;
+	bool addrok;
+	char group;
+
+	char expect[] = "cgminer-"; // first 8 bytes constant
+	char *expect_code;
+	size_t expect_code_len;
+	char buf[1024];
+	char replybuf[1024];
+
+	memset(&grp, 0, sizeof(grp));
+	grp.imr_multiaddr.s_addr = inet_addr(opt_api_mcast_addr);
+	if (grp.imr_multiaddr.s_addr == INADDR_NONE)
+		quit(1, "Invalid Multicast Address");
+	grp.imr_interface.s_addr = INADDR_ANY;
+
+	mcast_sock = socket(AF_INET, SOCK_DGRAM, 0);
+
+	int optval = 1;
+	if (SOCKETFAIL(setsockopt(mcast_sock, SOL_SOCKET, SO_REUSEADDR, (void *)(&optval), sizeof(optval)))) {
+		applog(LOG_ERR, "API mcast setsockopt SO_REUSEADDR failed (%s)%s", SOCKERRMSG, MUNAVAILABLE);
+		goto die;
+	}
+
+	memset(&listen, 0, sizeof(listen));
+	listen.sin_family = AF_INET;
+	listen.sin_addr.s_addr = INADDR_ANY;
+	listen.sin_port = htons(opt_api_mcast_port);
+
+	// try for more than 1 minute ... in case the old one hasn't completely gone yet
+	bound = 0;
+	bindstart = time(NULL);
+	while (bound == 0) {
+		if (SOCKETFAIL(bind(mcast_sock, (struct sockaddr *)(&listen), sizeof(listen)))) {
+			binderror = SOCKERRMSG;
+			if ((time(NULL) - bindstart) > 61)
+				break;
+			else
+				cgsleep_ms(30000);
+		} else
+			bound = 1;
+	}
+
+	if (bound == 0) {
+		applog(LOG_ERR, "API mcast bind to port %d failed (%s)%s", opt_api_port, binderror, MUNAVAILABLE);
+		goto die;
+	}
+
+	if (SOCKETFAIL(setsockopt(mcast_sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (void *)(&grp), sizeof(grp)))) {
+		applog(LOG_ERR, "API mcast join failed (%s)%s", SOCKERRMSG, MUNAVAILABLE);
+		goto die;
+	}
+
+	expect_code_len = sizeof(expect) + strlen(opt_api_mcast_code);
+	expect_code = malloc(expect_code_len+1);
+	if (!expect_code)
+		quit(1, "Failed to malloc mcast expect_code");
+	snprintf(expect_code, expect_code_len+1, "%s%s-", expect, opt_api_mcast_code);
+
+	count = 0;
+	while (80085) {
+		cgsleep_ms(1000);
+
+		count++;
+		came_from_siz = sizeof(came_from);
+		if (SOCKETFAIL(rep = recvfrom(mcast_sock, buf, sizeof(buf),
+						0, (struct sockaddr *)(&came_from), &came_from_siz))) {
+			applog(LOG_DEBUG, "API mcast failed count=%d (%s) (%d)",
+					count, SOCKERRMSG, (int)mcast_sock);
+			continue;
+		}
+
+		addrok = check_connect(&came_from, &connectaddr, &group);
+		applog(LOG_DEBUG, "API mcast from %s - %s",
+					connectaddr, addrok ? "Accepted" : "Ignored");
+		if (!addrok)
+			continue;
+
+		buf[rep] = '\0';
+		if (rep > 0 && buf[rep-1] == '\n')
+			buf[--rep] = '\0';
+
+		applog(LOG_DEBUG, "API mcast request rep=%d (%s) from %s:%d",
+					(int)rep, buf,
+					inet_ntoa(came_from.sin_addr),
+					ntohs(came_from.sin_port));
+
+		if ((size_t)rep > expect_code_len && memcmp(buf, expect_code, expect_code_len) == 0) {
+			reply_port = atoi(&buf[expect_code_len]);
+			if (reply_port < 1 || reply_port > 65535) {
+				applog(LOG_DEBUG, "API mcast request ignored - invalid port (%s)",
+							&buf[expect_code_len]);
+			} else {
+				applog(LOG_DEBUG, "API mcast request OK port %s=%d",
+							&buf[expect_code_len], reply_port);
+
+				came_from.sin_port = htons(reply_port);
+				reply_sock = socket(AF_INET, SOCK_DGRAM, 0);
+
+				snprintf(replybuf, sizeof(replybuf),
+							"cgm-" API_MCAST_CODE "-%d-%s",
+							opt_api_port, opt_api_mcast_des);
+
+				rep = sendto(reply_sock, replybuf, strlen(replybuf)+1,
+						0, (struct sockaddr *)(&came_from),
+						sizeof(came_from));
+				if (SOCKETFAIL(rep)) {
+					applog(LOG_DEBUG, "API mcast send reply failed (%s) (%d)",
+								SOCKERRMSG, (int)reply_sock);
+				} else {
+					applog(LOG_DEBUG, "API mcast send reply (%s) succeeded (%d) (%d)",
+								replybuf, (int)rep, (int)reply_sock);
+				}
+
+				CLOSESOCKET(reply_sock);
+			}
+		} else
+			applog(LOG_DEBUG, "API mcast request was no good");
+	}
+
+die:
+
+	CLOSESOCKET(mcast_sock);
+}
+
+static void *mcast_thread(void *userdata)
+{
+	struct thr_info *mythr = userdata;
+
+	pthread_detach(pthread_self());
+	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+
+	RenameThread("api_mcast");
+
+	mcast();
+
+	PTH(mythr) = 0L;
+
+	return NULL;
+}
+
+void mcast_init()
+{
+	struct thr_info *thr;
+
+	thr = calloc(1, sizeof(*thr));
+	if (!thr)
+		quit(1, "Failed to calloc mcast thr");
+
+	if (thr_info_create(thr, NULL, mcast_thread, thr))
+		quit(1, "API mcast thread create failed");
+}
+
 void api(int api_thr_id)
 {
 	struct io_data *io_data;
 	struct thr_info bye_thr;
 	char buf[TMPBUFSIZ];
 	char param_buf[TMPBUFSIZ];
-	const char *localaddr = "127.0.0.1";
 	SOCKETTYPE c;
 	int n, bound;
 	char *connectaddr;
@@ -4168,7 +4513,7 @@ void api(int api_thr_id)
 
 	/* This should be done before curl in needed
 	 * to ensure curl has already called WSAStartup() in windows */
-	nmsleep(opt_log_interval*1000);
+	cgsleep_ms(opt_log_interval*1000);
 
 	*apisock = socket(AF_INET, SOCK_STREAM, 0);
 	if (*apisock == INVSOCK) {
@@ -4214,7 +4559,7 @@ void api(int api_thr_id)
 				break;
 			else {
 				applog(LOG_WARNING, "API bind to port %d failed - trying again in 30sec", port);
-				nmsleep(30000);
+				cgsleep_ms(30000);
 			}
 		} else
 			bound = 1;
@@ -4240,6 +4585,9 @@ void api(int api_thr_id)
 			applog(LOG_WARNING, "API running in local read access mode on port %d (%d)", port, (int)*apisock);
 	}
 
+	if (opt_api_mcast)
+		mcast_init();
+
 	while (!bye) {
 		clisiz = sizeof(cli);
 		if (SOCKETFAIL(c = accept(*apisock, (struct sockaddr *)(&cli), &clisiz))) {
@@ -4247,28 +4595,9 @@ void api(int api_thr_id)
 			goto die;
 		}
 
-		connectaddr = inet_ntoa(cli.sin_addr);
-
-		addrok = false;
-		group = NOPRIVGROUP;
-		if (opt_api_allow) {
-			int client_ip = htonl(cli.sin_addr.s_addr);
-			for (i = 0; i < ips; i++) {
-				if ((client_ip & ipaccess[i].mask) == ipaccess[i].ip) {
-					addrok = true;
-					group = ipaccess[i].group;
-					break;
-				}
-			}
-		} else {
-			if (opt_api_network)
-				addrok = true;
-			else
-				addrok = (strcmp(connectaddr, localaddr) == 0);
-		}
-
-		if (opt_debug)
-			applog(LOG_DEBUG, "API: connection from %s - %s", connectaddr, addrok ? "Accepted" : "Ignored");
+		addrok = check_connect(&cli, &connectaddr, &group);
+		applog(LOG_DEBUG, "API: connection from %s - %s",
+					connectaddr, addrok ? "Accepted" : "Ignored");
 
 		if (addrok) {
 			n = recv(c, &buf[0], TMPBUFSIZ-1, 0);

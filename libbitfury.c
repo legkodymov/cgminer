@@ -357,7 +357,7 @@ int detect_chip(int chip_n) {
 		if (newbuf[16] != 0 && newbuf[16] != 0xFFFFFFFF) {
 			return 0;
 		}
-		nmsleep(BITFURY_REFRESH_DELAY / 10);
+		cgsleep_ms(BITFURY_REFRESH_DELAY / 10);
 		memcpy(oldbuf, newbuf, 17 * 4);
 	}
 	return 0;
@@ -382,7 +382,7 @@ int libbitfury_detectChips(struct bitfury_device *devices) {
 			int slot_detected = tm_i2c_detect(i) != -1;
 			slot_on[i] = slot_detected;
 			deselect_slot(i);
-			nmsleep(1);
+			cgsleep_ms(1);
 		}
 	}
 	else if (opt_bitfury_board_type == BITFURY_BOARD_TYPE_MBOARDV1) {
@@ -456,25 +456,23 @@ unsigned decnonce(unsigned in)
 	return out;
 }
 
-int rehash(unsigned char *midstate, unsigned m7,
-			unsigned ntime, unsigned nbits, unsigned nnonce) {
+int rehash(const void *midstate, const uint32_t m7, const uint32_t ntime, const uint32_t nbits, uint32_t nnonce) {
 	unsigned char in[16];
-	unsigned char hash1[32];
 	unsigned int *in32 = (unsigned int *)in;
-	unsigned char *hex;
 	unsigned int *mid32 = (unsigned int *)midstate;
 	unsigned out32[8];
 	unsigned char *out = (unsigned char *) out32;
+#ifdef BITFURY_REHASH_DEBUG
 	static unsigned history[512];
 	static unsigned history_p;
-	int i;
-	sha2_context ctx;
+#endif
+	sha256_ctx ctx;
 
 
-	memset( &ctx, 0, sizeof( sha2_context ) );
-	memcpy(ctx.state, mid32, 8*4);
-	ctx.total[0] = 64;
-	ctx.total[1] = 0;
+	memset( &ctx, 0, sizeof( sha256_ctx ) );
+	memcpy(ctx.h, mid32, 8*4);
+	ctx.tot_len = 64;
+	ctx.len = 0;
 
 	nnonce = bswap_32(nnonce);
 	in32[0] = bswap_32(m7);
@@ -482,16 +480,19 @@ int rehash(unsigned char *midstate, unsigned m7,
 	in32[2] = bswap_32(nbits);
 	in32[3] = nnonce;
 
-	sha2_update(&ctx, in, 16);
-	sha2_finish(&ctx, out);
-	sha2(out, 32, out);
+	sha256_update(&ctx, in, 16);
+	sha256_final(&ctx, out);
+	sha256(out, 32, out);
 
 	if (out32[7] == 0) {
-		hex = bin2hex(midstate, 32);
-		hex = bin2hex(out, 32);
-//		applog(LOG_INFO, "! MS0: %08x, m7: %08x, ntime: %08x, nbits: %08x, nnonce: %08x\n\t\t\t out: %s\n", mid32[0], m7, ntime, nbits, nnonce, hex);
-//		history[history_p] = nnonce;
-//		history_p++; history_p &= 512 - 1;
+#ifdef BITFURY_REHASH_DEBUG
+		char hex[65];
+		bin2hex(hex, out, 32);
+		applog(LOG_INFO, "! MS0: %08x, m7: %08x, ntime: %08x, nbits: %08x, nnonce: %08x", mid32[0], m7, ntime, nbits, nnonce);
+		applog(LOG_INFO, " out: %s", hex);
+		history[history_p] = nnonce;
+		history_p++; history_p &= 512 - 1;
+#endif
 		return 1;
 	}
 	return 0;

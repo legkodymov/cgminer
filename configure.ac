@@ -1,8 +1,8 @@
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_maj], [3])
-m4_define([v_min], [3])
-m4_define([v_mic], [1])
+m4_define([v_min], [4])
+m4_define([v_mic], [2])
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_ver], [v_maj.v_min.v_mic])
 m4_define([lt_rev], m4_eval(v_maj + v_min))
@@ -50,7 +50,7 @@ AC_PROG_CC
 gl_EARLY
 AC_PROG_GCC_TRADITIONAL
 AM_PROG_CC_C_O
-AC_PROG_RANLIB
+LT_INIT([disable-shared])
 
 gl_INIT
 
@@ -67,6 +67,7 @@ OPENCL_LIBS="-lOpenCL"
 WS2_LIBS=""
 MM_LIBS=""
 MATH_LIBS="-lm"
+RT_LIBS="-lrt"
 
 case $target in
   amd64-*)
@@ -81,22 +82,28 @@ case $target in
 esac
 
 case $target in
+  *-*-linux-gnu*)
+    have_linux=true
+    ;;
   *-*-mingw*)
     have_win32=true
     PTHREAD_FLAGS=""
     DLOPEN_FLAGS=""
     WS2_LIBS="-lws2_32"
     MM_LIBS="-lwinmm"
+    RT_LIBS=""
     AC_DEFINE([_WIN32_WINNT], [0x0501], "WinNT version for XP+ support")
     ;;
   powerpc-*-darwin*)
     CFLAGS="$CFLAGS -faltivec"
     OPENCL_LIBS=""
     PTHREAD_FLAGS=""
+    RT_LIBS=""
     ;;
   *-*-darwin*)
     OPENCL_LIBS="-framework OpenCL"
     PTHREAD_FLAGS=""
+    RT_LIBS=""
 	;;
 esac
 
@@ -175,8 +182,6 @@ if test "x$has_winpthread" != xtrue; then
                 AC_MSG_ERROR([Could not find pthread library - please install libpthread]))
         PTHREAD_LIBS=-lpthread
 fi
-
-AC_CHECK_LIB(jansson, json_loads, request_jansson=false, request_jansson=true)
 
 AC_ARG_ENABLE([adl],
 	[AC_HELP_STRING([--disable-adl],[Override detection and disable building with adl])],
@@ -314,23 +319,30 @@ else
 	])
 fi
 
+if test x$avalon$bitforce$modminer$bflsc$icarus != xnonononono; then
+	want_usbutils=true
+else
+	want_usbutils=false
+fi
+
 AM_CONDITIONAL([NEED_FPGAUTILS], [test x$modminer$ztex != xnono])
-AM_CONDITIONAL([NEED_USBUTILS_C], [test x$avalon$bitforce$modminer$bflsc$icarus != xnonononono])
+AM_CONDITIONAL([WANT_USBUTILS], [test x$want_usbutils != xfalse])
 AM_CONDITIONAL([HAVE_CURSES], [test x$curses = xyes])
-AM_CONDITIONAL([WANT_JANSSON], [test x$request_jansson = xtrue])
 AM_CONDITIONAL([HAVE_WINDOWS], [test x$have_win32 = xtrue])
 AM_CONDITIONAL([HAVE_x86_64], [test x$have_x86_64 = xtrue])
 
-if test "x$avalon$bitforce$modminer$bflsc$icarus" != xnonononono; then
+AC_CONFIG_SUBDIRS([compat/libusb-1.0])
+if test "x$want_usbutils" != xfalse; then
 	AC_DEFINE([USE_USBUTILS], [1], [Defined to 1 if usbutils support required])
+	LIBUSB_LIBS="compat/libusb-1.0/libusb/.libs/libusb-1.0.a"
+	if test "x$have_linux" = "xtrue"; then
+		PKG_CHECK_MODULES([UDEV], [libudev], LIBUSB_LIBS+=" -ludev", [AC_MSG_ERROR([Missing required libudev dev])])
+	fi
+else
+	LIBUSB_LIBS=""
 fi
 
-if test x$request_jansson = xtrue
-then
-	JANSSON_LIBS="compat/jansson/libjansson.a"
-else
-	JANSSON_LIBS=-ljansson
-fi
+JANSSON_LIBS="compat/jansson/libjansson.a"
 
 PKG_PROG_PKG_CONFIG()
 
@@ -344,18 +356,6 @@ if test "x$have_cgminer_sdk" = "xtrue"; then
 	PKG_CONFIG_PATH="$CGMINER_SDK/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 fi
 
-if test "x$avalon$ztex$modminer$bitforce$bflsc$icarus" != xnononononono; then
-  case $target in
-    *-*-freebsd*)
-      LIBUSB_LIBS="-lusb"
-      LIBUSB_CFLAGS=""
-      AC_DEFINE(HAVE_LIBUSB, 1, [Define if you have libusb-1.0])
-      ;;
-    *)
-      PKG_CHECK_MODULES(LIBUSB, libusb-1.0, [AC_DEFINE(HAVE_LIBUSB, 1, [Define if you have libusb-1.0])], [AC_MSG_ERROR([Could not find usb library - please install libusb-1.0])])
-      ;;
-  esac
-fi
 AC_SUBST(LIBUSB_LIBS)
 AC_SUBST(LIBUSB_CFLAGS)
 
@@ -432,6 +432,7 @@ AC_SUBST(PDCURSES_LIBS)
 AC_SUBST(WS2_LIBS)
 AC_SUBST(MM_LIBS)
 AC_SUBST(MATH_LIBS)
+AC_SUBST(RT_LIBS)
 AC_SUBST(ADL_CPPFLAGS)
 
 AC_CONFIG_FILES([
@@ -537,9 +538,9 @@ fi
 echo
 echo "Compilation............: make (or gmake)"
 echo "  CPPFLAGS.............: $CPPFLAGS"
-echo "  CFLAGS...............: $CFLAGS $LIBUSB_CFLAGS"
+echo "  CFLAGS...............: $CFLAGS"
 echo "  LDFLAGS..............: $LDFLAGS $PTHREAD_FLAGS"
-echo "  LDADD................: $DLOPEN_FLAGS $LIBCURL_LIBS $JANSSON_LIBS $PTHREAD_LIBS $OPENCL_LIBS $NCURSES_LIBS $PDCURSES_LIBS $WS2_LIBS $MATH_LIBS $LIBUSB_LIBS"
+echo "  LDADD................: $DLOPEN_FLAGS $LIBCURL_LIBS $JANSSON_LIBS $PTHREAD_LIBS $OPENCL_LIBS $NCURSES_LIBS $PDCURSES_LIBS $WS2_LIBS $MATH_LIBS $LIBUSB_LIBS $RT_LIBS"
 echo
 echo "Installation...........: make install (as root if needed, with 'su' or 'sudo')"
 echo "  prefix...............: $prefix"

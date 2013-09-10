@@ -192,6 +192,21 @@ static struct usb_find_devices find_dev[] = {
 #ifdef USE_AVALON
 	{
 		.drv = DRV_AVALON,
+		.name = "BTB",
+		.ident = IDENT_BTB,
+		.idVendor = IDVENDOR_FTDI,
+		.idProduct = 0x6001,
+		.iManufacturer = "Burnin Electronics",
+		.iProduct = "BitBurner",
+		.kernel = 0,
+		.config = 1,
+		.interface = 0,
+		.timeout = AVALON_TIMEOUT_MS,
+		.latency = 10,
+		.epcount = ARRAY_SIZE(ava_eps),
+		.eps = ava_eps },
+	{
+		.drv = DRV_AVALON,
 		.name = "AVA",
 		.ident = IDENT_AVA,
 		.idVendor = IDVENDOR_FTDI,
@@ -402,12 +417,9 @@ struct resource_reply {
 // Replies to lock requests
 struct resource_reply *res_reply_head = NULL;
 
-// Set this to 0 to remove stats processing
-#define DO_USB_STATS 1
-
-static bool stats_initialised = false;
-
-#if DO_USB_STATS
+// Some stats need to always be defined
+#define SEQ0 0
+#define SEQ1 1
 
 // NONE must be 0 - calloced
 #define MODE_NONE 0
@@ -415,6 +427,13 @@ static bool stats_initialised = false;
 #define MODE_CTRL_WRITE (1 << 1)
 #define MODE_BULK_READ (1 << 2)
 #define MODE_BULK_WRITE (1 << 3)
+
+// Set this to 0 to remove stats processing
+#define DO_USB_STATS 1
+
+static bool stats_initialised = false;
+
+#if DO_USB_STATS
 
 #define MODE_SEP_STR "+"
 #define MODE_NONE_STR "X"
@@ -451,20 +470,20 @@ struct cg_usb_stats {
 	struct cg_usb_stats_details *details;
 };
 
-#define SEQ0 0
-#define SEQ1 1
-
 static struct cg_usb_stats *usb_stats = NULL;
 static int next_stat = USB_NOSTAT;
 
-#define USB_STATS(sgpu, sta, fin, err, mode, cmd, seq) \
-		stats(cgpu, sta, fin, err, mode, cmd, seq)
-#define STATS_TIMEVAL(tv) cgtime(tv)
-#define USB_REJECT(sgpu, mode) rejected_inc(sgpu, mode)
+#define SECTOMS(s) ((int)((s) * 1000))
+
+#define USB_STATS(sgpu_, sta_, fin_, err_, mode_, cmd_, seq_, tmo_) \
+		stats(sgpu_, sta_, fin_, err_, mode_, cmd_, seq_, tmo_)
+#define STATS_TIMEVAL(tv_) cgtime(tv_)
+#define USB_REJECT(sgpu_, mode_) rejected_inc(sgpu_, mode_)
+
 #else
-#define USB_STATS(sgpu, sta, fin, err, mode, cmd, seq)
-#define STATS_TIMEVAL(tv)
-#define USB_REJECT(sgpu, mode)
+#define USB_STATS(sgpu_, sta_, fin_, err_, mode_, cmd_, seq_, tmo_)
+#define STATS_TIMEVAL(tv_)
+#define USB_REJECT(sgpu_, mode_)
 
 #endif // DO_USB_STATS
 
@@ -531,6 +550,8 @@ static const char *C_AVALON_RESET_S = "AvalonReset";
 static const char *C_GET_AVALON_RESET_S = "GetAvalonReset";
 static const char *C_FTDI_STATUS_S = "FTDIStatus";
 static const char *C_ENABLE_UART_S = "EnableUART";
+static const char *C_BB_SET_VOLTAGE_S = "SetCoreVoltage";
+static const char *C_BB_GET_VOLTAGE_S = "GetCoreVoltage";
 
 #ifdef EOL
 #undef EOL
@@ -712,7 +733,7 @@ static bool setgetdes(ssize_t count, libusb_device *dev, struct libusb_device_ha
 
 	err = libusb_set_configuration(handle, cd);
 	if (err) {
-		sprintf(tmp, EOL "  ** dev %d: Failed to set config descriptor to %d, err %d",
+		snprintf(tmp, sizeof(tmp), EOL "  ** dev %d: Failed to set config descriptor to %d, err %d",
 				(int)count, cd, err);
 		append(buf, tmp, off, len);
 		return false;
@@ -720,13 +741,13 @@ static bool setgetdes(ssize_t count, libusb_device *dev, struct libusb_device_ha
 
 	err = libusb_get_active_config_descriptor(dev, config);
 	if (err) {
-		sprintf(tmp, EOL "  ** dev %d: Failed to get active config descriptor set to %d, err %d",
+		snprintf(tmp, sizeof(tmp), EOL "  ** dev %d: Failed to get active config descriptor set to %d, err %d",
 				(int)count, cd, err);
 		append(buf, tmp, off, len);
 		return false;
 	}
 
-	sprintf(tmp, EOL "  ** dev %d: Set & Got active config descriptor to %d, err %d",
+	snprintf(tmp, sizeof(tmp), EOL "  ** dev %d: Set & Got active config descriptor to %d, err %d",
 			(int)count, cd, err);
 	append(buf, tmp, off, len);
 	return true;
@@ -749,7 +770,7 @@ static void usb_full(ssize_t *count, libusb_device *dev, char **buf, size_t *off
 
 	err = libusb_get_device_descriptor(dev, &desc);
 	if (opt_usb_list_all && err) {
-		sprintf(tmp, EOL ".USB dev %d: Failed to get descriptor, err %d",
+		snprintf(tmp, sizeof(tmp), EOL ".USB dev %d: Failed to get descriptor, err %d",
 					(int)(++(*count)), err);
 		append(buf, tmp, off, len);
 		return;
@@ -775,11 +796,11 @@ static void usb_full(ssize_t *count, libusb_device *dev, char **buf, size_t *off
 	(*count)++;
 
 	if (level == 0) {
-		sprintf(tmp, EOL ".USB dev %d: Bus %d Device %d ID: %04x:%04x",
+		snprintf(tmp, sizeof(tmp), EOL ".USB dev %d: Bus %d Device %d ID: %04x:%04x",
 				(int)(*count), (int)bus_number, (int)device_address,
 				desc.idVendor, desc.idProduct);
 	} else {
-		sprintf(tmp, EOL ".USB dev %d: Bus %d Device %d Device Descriptor:" EOL "\tLength: %d" EOL
+		snprintf(tmp, sizeof(tmp), EOL ".USB dev %d: Bus %d Device %d Device Descriptor:" EOL "\tLength: %d" EOL
 			"\tDescriptor Type: %s" EOL "\tUSB: %04x" EOL "\tDeviceClass: %d" EOL
 			"\tDeviceSubClass: %d" EOL "\tDeviceProtocol: %d" EOL "\tMaxPacketSize0: %d" EOL
 			"\tidVendor: %04x" EOL "\tidProduct: %04x" EOL "\tDeviceRelease: %x" EOL
@@ -795,28 +816,28 @@ static void usb_full(ssize_t *count, libusb_device *dev, char **buf, size_t *off
 
 	err = libusb_open(dev, &handle);
 	if (err) {
-		sprintf(tmp, EOL "  ** dev %d: Failed to open, err %d", (int)(*count), err);
+		snprintf(tmp, sizeof(tmp), EOL "  ** dev %d: Failed to open, err %d", (int)(*count), err);
 		append(buf, tmp, off, len);
 		return;
 	}
 
 	err = libusb_get_string_descriptor_ascii(handle, desc.iManufacturer, man, STRBUFLEN);
 	if (err < 0)
-		sprintf((char *)man, "** err(%d)%s", err, usberrstr(err));
+		snprintf((char *)man, sizeof(man), "** err(%d)%s", err, usberrstr(err));
 
 	err = libusb_get_string_descriptor_ascii(handle, desc.iProduct, prod, STRBUFLEN);
 	if (err < 0)
-		sprintf((char *)prod, "** err(%d)%s", err, usberrstr(err));
+		snprintf((char *)prod, sizeof(prod), "** err(%d)%s", err, usberrstr(err));
 
 	if (level == 0) {
 		libusb_close(handle);
-		sprintf(tmp, EOL "  Manufacturer: '%s'" EOL "  Product: '%s'", man, prod);
+		snprintf(tmp, sizeof(tmp), EOL "  Manufacturer: '%s'" EOL "  Product: '%s'", man, prod);
 		append(buf, tmp, off, len);
 		return;
 	}
 
 	if (libusb_kernel_driver_active(handle, 0) == 1) {
-		sprintf(tmp, EOL "   * dev %d: kernel attached", (int)(*count));
+		snprintf(tmp, sizeof(tmp), EOL "   * dev %d: kernel attached", (int)(*count));
 		append(buf, tmp, off, len);
 	}
 
@@ -825,14 +846,14 @@ static void usb_full(ssize_t *count, libusb_device *dev, char **buf, size_t *off
 		if (!setgetdes(*count, dev, handle, &config, 1, buf, off, len)
 		&&  !setgetdes(*count, dev, handle, &config, 0, buf, off, len)) {
 			libusb_close(handle);
-			sprintf(tmp, EOL "  ** dev %d: Failed to set config descriptor to %d or %d",
+			snprintf(tmp, sizeof(tmp), EOL "  ** dev %d: Failed to set config descriptor to %d or %d",
 					(int)(*count), 1, 0);
 			append(buf, tmp, off, len);
 			return;
 		}
 	}
 
-	sprintf(tmp, EOL "     dev %d: Active Config:" EOL "\tDescriptorType: %s" EOL
+	snprintf(tmp, sizeof(tmp), EOL "     dev %d: Active Config:" EOL "\tDescriptorType: %s" EOL
 			"\tNumInterfaces: %d" EOL "\tConfigurationValue: %d" EOL
 			"\tAttributes: %d" EOL "\tMaxPower: %d",
 				(int)(*count), destype(config->bDescriptorType),
@@ -844,7 +865,7 @@ static void usb_full(ssize_t *count, libusb_device *dev, char **buf, size_t *off
 		for (j = 0; j < config->interface[i].num_altsetting; j++) {
 			idesc = &(config->interface[i].altsetting[j]);
 
-			sprintf(tmp, EOL "     _dev %d: Interface Descriptor %d:" EOL
+			snprintf(tmp, sizeof(tmp), EOL "     _dev %d: Interface Descriptor %d:" EOL
 					"\tDescriptorType: %s" EOL "\tInterfaceNumber: %d" EOL
 					"\tNumEndpoints: %d" EOL "\tInterfaceClass: %d" EOL
 					"\tInterfaceSubClass: %d" EOL "\tInterfaceProtocol: %d",
@@ -859,7 +880,7 @@ static void usb_full(ssize_t *count, libusb_device *dev, char **buf, size_t *off
 			for (k = 0; k < (int)(idesc->bNumEndpoints); k++) {
 				epdesc = &(idesc->endpoint[k]);
 
-				sprintf(tmp, EOL "     __dev %d: Interface %d Endpoint %d:" EOL
+				snprintf(tmp, sizeof(tmp), EOL "     __dev %d: Interface %d Endpoint %d:" EOL
 						"\tDescriptorType: %s" EOL
 						"\tEndpointAddress: %s0x%x" EOL
 						"\tAttributes: %s" EOL "\tMaxPacketSize: %d" EOL
@@ -882,9 +903,9 @@ static void usb_full(ssize_t *count, libusb_device *dev, char **buf, size_t *off
 
 	err = libusb_get_string_descriptor_ascii(handle, desc.iSerialNumber, ser, STRBUFLEN);
 	if (err < 0)
-		sprintf((char *)ser, "** err(%d)%s", err, usberrstr(err));
+		snprintf((char *)ser, sizeof(ser), "** err(%d)%s", err, usberrstr(err));
 
-	sprintf(tmp, EOL "     dev %d: More Info:" EOL "\tManufacturer: '%s'" EOL
+	snprintf(tmp, sizeof(tmp), EOL "     dev %d: More Info:" EOL "\tManufacturer: '%s'" EOL
 			"\tProduct: '%s'" EOL "\tSerial '%s'",
 				(int)(*count), man, prod, ser);
 	append(buf, tmp, off, len);
@@ -1019,6 +1040,8 @@ static void cgusb_check_init()
 		usb_commands[C_GET_AVALON_RESET] = C_GET_AVALON_RESET_S;
 		usb_commands[C_FTDI_STATUS] = C_FTDI_STATUS_S;
 		usb_commands[C_ENABLE_UART] = C_ENABLE_UART_S;
+		usb_commands[C_BB_SET_VOLTAGE] = C_BB_SET_VOLTAGE_S;
+		usb_commands[C_BB_GET_VOLTAGE] = C_BB_GET_VOLTAGE_S;
 
 		stats_initialised = true;
 	}
@@ -1239,7 +1262,7 @@ static bool cgminer_usb_lock_bd(struct device_drv *drv, uint8_t bus_number, uint
 
 	// TODO: add a timeout fail - restart the resource thread?
 	while (true) {
-		nmsleep(50);
+		cgsleep_ms(50);
 
 		mutex_lock(&cgusbres_lock);
 		if (res_reply_head) {
@@ -1485,19 +1508,20 @@ static int _usb_init(struct cgpu_info *cgpu, struct libusb_device *dev, struct u
 	char devstr[STRBUFLEN+1];
 	int err, i, j, k, pstate;
 	int bad = USB_INIT_FAIL;
+	int cfg;
 
 	DEVLOCK(cgpu, pstate);
 
 	cgpu->usbinfo.bus_number = libusb_get_bus_number(dev);
 	cgpu->usbinfo.device_address = libusb_get_device_address(dev);
 
-	sprintf(devpath, "%d:%d",
+	snprintf(devpath, sizeof(devpath), "%d:%d",
 		(int)(cgpu->usbinfo.bus_number),
 		(int)(cgpu->usbinfo.device_address));
 
 	cgpu->device_path = strdup(devpath);
 
-	sprintf(devstr, "- %s device %s", found->name, devpath);
+	snprintf(devstr, sizeof(devstr), "- %s device %s", found->name, devpath);
 
 	cgusb = calloc(1, sizeof(*cgusb));
 	if (unlikely(!cgusb))
@@ -1528,8 +1552,8 @@ static int _usb_init(struct cgpu_info *cgpu, struct libusb_device *dev, struct u
 		switch (err) {
 			case LIBUSB_ERROR_ACCESS:
 				applog(LOG_ERR,
-					"USB init open device failed, err %d, "
-					"you dont have priviledge to access %s",
+					"USB init, open device failed, err %d, "
+					"you don't have privilege to access %s",
 					err, devstr);
 				break;
 #ifdef WIN32
@@ -1606,20 +1630,28 @@ static int _usb_init(struct cgpu_info *cgpu, struct libusb_device *dev, struct u
 		}
 	}
 
-	err = libusb_set_configuration(cgusb->handle, found->config);
-	if (err) {
-		switch(err) {
-			case LIBUSB_ERROR_BUSY:
-				applog(LOG_WARNING,
-					"USB init, set config %d in use %s",
-					found->config, devstr);
-				break;
-			default:
-				applog(LOG_DEBUG,
-					"USB init, failed to set config to %d, err %d %s",
-					found->config, err, devstr);
+	cfg = -1;
+	err = libusb_get_configuration(cgusb->handle, &cfg);
+	if (err)
+		cfg = -1;
+
+	// Try to set it if we can't read it or it's different
+	if (cfg != found->config) {
+		err = libusb_set_configuration(cgusb->handle, found->config);
+		if (err) {
+			switch(err) {
+				case LIBUSB_ERROR_BUSY:
+					applog(LOG_WARNING,
+						"USB init, set config %d in use %s",
+						found->config, devstr);
+					break;
+				default:
+					applog(LOG_DEBUG,
+						"USB init, failed to set config to %d, err %d %s",
+						found->config, err, devstr);
+			}
+			goto cldame;
 		}
-		goto cldame;
 	}
 
 	err = libusb_get_active_config_descriptor(dev, &config);
@@ -1681,6 +1713,17 @@ static int _usb_init(struct cgpu_info *cgpu, struct libusb_device *dev, struct u
 		goto cldame;
 	}
 
+	cfg = -1;
+	err = libusb_get_configuration(cgusb->handle, &cfg);
+	if (err)
+		cfg = -1;
+	if (cfg != found->config) {
+		applog(LOG_WARNING,
+			"USB init, incorrect config (%d!=%d) after claim of %s",
+			cfg, found->config, devstr);
+		goto reldame;
+	}
+
 	cgusb->usbver = cgusb->descriptor->bcdUSB;
 
 // TODO: allow this with the right version of the libusb include and running library
@@ -1732,6 +1775,10 @@ static int _usb_init(struct cgpu_info *cgpu, struct libusb_device *dev, struct u
 	bad = USB_INIT_OK;
 	goto out_unlock;
 
+reldame:
+
+	libusb_release_interface(cgusb->handle, found->interface);
+
 cldame:
 
 	cg_wlock(&cgusb_fd_lock);
@@ -1751,11 +1798,27 @@ out_unlock:
 	return bad;
 }
 
-bool usb_init(struct cgpu_info *cgpu, struct libusb_device *dev, struct usb_find_devices *found)
+bool usb_init(struct cgpu_info *cgpu, struct libusb_device *dev, struct usb_find_devices *found_match)
 {
-	int ret;
+	struct usb_find_devices *found_use = NULL;
+	int uninitialised_var(ret);
+	int i;
 
-	ret = _usb_init(cgpu, dev, found);
+	for (i = 0; find_dev[i].drv != DRV_LAST; i++) {
+		if (find_dev[i].drv == found_match->drv &&
+		    find_dev[i].idVendor == found_match->idVendor &&
+		    find_dev[i].idProduct == found_match->idProduct) {
+			found_use = malloc(sizeof(*found_use));
+			if (unlikely(!found_use))
+				quit(1, "USB failed to malloc found_use");
+			memcpy(found_use, &(find_dev[i]), sizeof(*found_use));
+
+			ret = _usb_init(cgpu, dev, found_use);
+
+			if (ret != USB_INIT_IGNORE)
+				break;
+		}
+	}
 
 	if (ret == USB_INIT_FAIL)
 		applog(LOG_ERR, "%s detect (%d:%d) failed to initialise (incorrect device?)",
@@ -1897,6 +1960,8 @@ void usb_detect(struct device_drv *drv, bool (*device_detect)(struct libusb_devi
 
 	if (count == 0)
 		applog(LOG_DEBUG, "USB scan devices: found no devices");
+	else
+		cgsleep_ms(166);
 
 	for (i = 0; i < count; i++) {
 		if (total_count >= total_limit) {
@@ -1922,6 +1987,7 @@ void usb_detect(struct device_drv *drv, bool (*device_detect)(struct libusb_devi
 					total_count++;
 					drv_count[drv->drv_id].count++;
 				}
+				free(found);
 			}
 		}
 	}
@@ -2091,14 +2157,44 @@ void update_usb_stats(__maybe_unused struct cgpu_info *cgpu)
 }
 
 #if DO_USB_STATS
-static void stats(struct cgpu_info *cgpu, struct timeval *tv_start, struct timeval *tv_finish, int err, int mode, enum usb_cmds cmd, int seq)
+static void stats(struct cgpu_info *cgpu, struct timeval *tv_start, struct timeval *tv_finish, int err, int mode, enum usb_cmds cmd, int seq, int timeout)
 {
 	struct cg_usb_stats_details *details;
 	double diff;
-	int item;
+	int item, extrams;
 
 	if (cgpu->usbinfo.usbstat < 1)
 		newstats(cgpu);
+
+	cgpu->usbinfo.tmo_count++;
+
+	// timeout checks are only done when stats are enabled
+	extrams = SECTOMS(tdiff(tv_finish, tv_start)) - timeout;
+	if (extrams >= USB_TMO_0) {
+		uint32_t totms = (uint32_t)(timeout + extrams);
+		int offset = 0;
+
+		if (extrams >= USB_TMO_2) {
+			applog(LOG_ERR, "%s%i: TIMEOUT %s took %dms but was %dms",
+					cgpu->drv->name, cgpu->device_id,
+					usb_cmdname(cmd), totms, timeout) ;
+			offset = 2;
+		} else if (extrams >= USB_TMO_1)
+			offset = 1;
+
+		cgpu->usbinfo.usb_tmo[offset].count++;
+		cgpu->usbinfo.usb_tmo[offset].total_over += extrams;
+		cgpu->usbinfo.usb_tmo[offset].total_tmo += timeout;
+		if (cgpu->usbinfo.usb_tmo[offset].min_tmo == 0) {
+			cgpu->usbinfo.usb_tmo[offset].min_tmo = totms;
+			cgpu->usbinfo.usb_tmo[offset].max_tmo = totms;
+		} else {
+			if (cgpu->usbinfo.usb_tmo[offset].min_tmo > totms)
+				cgpu->usbinfo.usb_tmo[offset].min_tmo = totms;
+			if (cgpu->usbinfo.usb_tmo[offset].max_tmo < totms)
+				cgpu->usbinfo.usb_tmo[offset].max_tmo = totms;
+		}
+	}
 
 	details = &(usb_stats[cgpu->usbinfo.usbstat - 1].details[cmd * 2 + seq]);
 	details->modes |= mode;
@@ -2182,10 +2278,15 @@ static int
 usb_bulk_transfer(struct libusb_device_handle *dev_handle,
 		  unsigned char endpoint, unsigned char *data, int length,
 		  int *transferred, unsigned int timeout,
-		  struct cgpu_info *cgpu, enum usb_cmds cmd)
+		  struct cgpu_info *cgpu, __maybe_unused int mode,
+		  enum usb_cmds cmd, __maybe_unused int seq)
 {
 	uint16_t MaxPacketSize;
 	int err, errn, tries = 0;
+#if DO_USB_STATS
+	struct timeval tv_start, tv_finish;
+#endif
+	unsigned char *buf;
 
 	/* Limit length of transfer to the largest this descriptor supports
 	 * and leave the higher level functions to transfer more if needed. */
@@ -2195,12 +2296,18 @@ usb_bulk_transfer(struct libusb_device_handle *dev_handle,
 		MaxPacketSize = cgpu->usbdev->found->wMaxPacketSize;
 	if (length > MaxPacketSize)
 		length = MaxPacketSize;
+	buf = alloca(MaxPacketSize);
+	if (endpoint == LIBUSB_ENDPOINT_OUT)
+		memcpy(buf, data, length);
 
+	STATS_TIMEVAL(&tv_start);
 	cg_rlock(&cgusb_fd_lock);
 	err = libusb_bulk_transfer(dev_handle, endpoint, data, length,
 				   transferred, timeout);
 	errn = errno;
 	cg_runlock(&cgusb_fd_lock);
+	STATS_TIMEVAL(&tv_finish);
+	USB_STATS(cgpu, &tv_start, &tv_finish, err, mode, cmd, seq, timeout);
 
 	if (err < 0)
 		applog(LOG_DEBUG, "%s%i: %s (amt=%d err=%d ern=%d)",
@@ -2220,11 +2327,14 @@ usb_bulk_transfer(struct libusb_device_handle *dev_handle,
 					break;
 			}
 
+			STATS_TIMEVAL(&tv_start);
 			cg_rlock(&cgusb_fd_lock);
 			err = libusb_bulk_transfer(dev_handle, endpoint, data,
 						   length, transferred, timeout);
 			errn = errno;
 			cg_runlock(&cgusb_fd_lock);
+			STATS_TIMEVAL(&tv_finish);
+			USB_STATS(cgpu, &tv_start, &tv_finish, err, mode, cmd, seq, timeout);
 
 			if (err < 0)
 				applog(LOG_DEBUG, "%s%i: %s (amt=%d err=%d ern=%d)",
@@ -2240,6 +2350,8 @@ usb_bulk_transfer(struct libusb_device_handle *dev_handle,
 		if (err)
 			cgpu->usbinfo.clear_fail_count++;
 	}
+	if (endpoint == LIBUSB_ENDPOINT_OUT)
+		memcpy(data, buf, length);
 
 	return err;
 }
@@ -2248,9 +2360,6 @@ int _usb_read(struct cgpu_info *cgpu, int ep, char *buf, size_t bufsiz, int *pro
 {
 	struct cg_usb_device *usbdev;
 	bool ftdi;
-#if DO_USB_STATS
-	struct timeval tv_start;
-#endif
 	struct timeval read_start, tv_finish;
 	unsigned int initial_timeout;
 	double max, done;
@@ -2258,9 +2367,7 @@ int _usb_read(struct cgpu_info *cgpu, int ep, char *buf, size_t bufsiz, int *pro
 	bool first = true;
 	char *search;
 	int endlen;
-
-	// We add 4: 1 for null, 2 for FTDI status and 1 to round to 4 bytes
-	unsigned char usbbuf[USB_MAX_READ+4], *ptr;
+	unsigned char *ptr, *usbbuf = cgpu->usbinfo.bulkbuf;
 	size_t usbbufread;
 
 	DEVLOCK(cgpu, pstate);
@@ -2314,32 +2421,27 @@ int _usb_read(struct cgpu_info *cgpu, int ep, char *buf, size_t bufsiz, int *pro
 			}
 			got = 0;
 
-			if (first && usbdev->usecps) {
-				if (usbdev->last_write_tv.tv_sec && usbdev->last_write_siz) {
-					struct timeval now;
-					double need;
+			if (first && usbdev->usecps && usbdev->last_write_siz) {
+				cgtimer_t now, already_done;
+				double sleep_estimate;
+				double write_time = (double)(usbdev->last_write_siz) /
+						    (double)(usbdev->cps);
 
-					cgtime(&now);
-					need = (double)(usbdev->last_write_siz) /
-						(double)(usbdev->cps) -
-						tdiff(&now, &(usbdev->last_write_tv));
+				cgtimer_time(&now);
+				cgtimer_sub(&now, &usbdev->cgt_last_write, &already_done);
+				sleep_estimate = write_time - cgtimer_to_ms(&already_done);
 
-					// Simple error condition check/avoidance '< 1.0'
-					if (need > 0.0 && need < 1.0) {
-						cgpu->usbinfo.read_delay_count++;
-						cgpu->usbinfo.total_read_delay += need;
-						nmsleep((unsigned int)(need * 1000.0));
-					}
+				if (sleep_estimate > 0.0) {
+					cgsleep_ms_r(&usbdev->cgt_last_write, write_time * 1000.0);
+					cgpu->usbinfo.read_delay_count++;
+					cgpu->usbinfo.total_read_delay += sleep_estimate;
 				}
 			}
-			STATS_TIMEVAL(&tv_start);
 			err = usb_bulk_transfer(usbdev->handle,
 						usbdev->found->eps[ep].ep,
 						ptr, usbbufread, &got, timeout,
-						cgpu, cmd);
+						cgpu, MODE_BULK_READ, cmd, first ? SEQ0 : SEQ1);
 			cgtime(&tv_finish);
-			USB_STATS(cgpu, &tv_start, &tv_finish, err,
-					MODE_BULK_READ, cmd, first ? SEQ0 : SEQ1);
 			ptr[got] = '\0';
 
 			USBDEBUG("USB debug: @_usb_read(%s (nodev=%s)) first=%s err=%d%s got=%d ptr='%s' usbbufread=%zu", cgpu->drv->name, bool_str(cgpu->usbinfo.nodev), bool_str(first), err, isnodev(err), got, (char *)str_text((char *)ptr), usbbufread);
@@ -2423,32 +2525,27 @@ int _usb_read(struct cgpu_info *cgpu, int ep, char *buf, size_t bufsiz, int *pro
 				usbbufread = bufleft;
 		}
 		got = 0;
-		if (first && usbdev->usecps) {
-			if (usbdev->last_write_tv.tv_sec && usbdev->last_write_siz) {
-				struct timeval now;
-				double need;
+		if (first && usbdev->usecps && usbdev->last_write_siz) {
+			cgtimer_t now, already_done;
+			double sleep_estimate;
+			double write_time = (double)(usbdev->last_write_siz) /
+					    (double)(usbdev->cps);
 
-				cgtime(&now);
-				need = (double)(usbdev->last_write_siz) /
-					(double)(usbdev->cps) -
-					tdiff(&now, &(usbdev->last_write_tv));
+			cgtimer_time(&now);
+			cgtimer_sub(&now, &usbdev->cgt_last_write, &already_done);
+			sleep_estimate = write_time - cgtimer_to_ms(&already_done);
 
-				// Simple error condition check/avoidance '< 1.0'
-				if (need > 0.0 && need < 1.0) {
-					cgpu->usbinfo.read_delay_count++;
-					cgpu->usbinfo.total_read_delay += need;
-					nmsleep((unsigned int)(need * 1000.0));
-				}
+			if (sleep_estimate > 0.0) {
+				cgsleep_ms_r(&usbdev->cgt_last_write, write_time * 1000.0);
+				cgpu->usbinfo.read_delay_count++;
+				cgpu->usbinfo.total_read_delay += sleep_estimate;
 			}
 		}
-		STATS_TIMEVAL(&tv_start);
 		err = usb_bulk_transfer(usbdev->handle,
 					usbdev->found->eps[ep].ep, ptr,
 					usbbufread, &got, timeout,
-					cgpu, cmd);
+					cgpu, MODE_BULK_READ, cmd, first ? SEQ0 : SEQ1);
 		cgtime(&tv_finish);
-		USB_STATS(cgpu, &tv_start, &tv_finish, err,
-				MODE_BULK_READ, cmd, first ? SEQ0 : SEQ1);
 		ptr[got] = '\0';
 
 		USBDEBUG("USB debug: @_usb_read(%s (nodev=%s)) first=%s err=%d%s got=%d ptr='%s' usbbufread=%zu", cgpu->drv->name, bool_str(cgpu->usbinfo.nodev), bool_str(first), err, isnodev(err), got, (char *)str_text((char *)ptr), usbbufread);
@@ -2535,9 +2632,6 @@ out_unlock:
 int _usb_write(struct cgpu_info *cgpu, int ep, char *buf, size_t bufsiz, int *processed, unsigned int timeout, enum usb_cmds cmd)
 {
 	struct cg_usb_device *usbdev;
-#if DO_USB_STATS
-	struct timeval tv_start;
-#endif
 	struct timeval read_start, tv_finish;
 	unsigned int initial_timeout;
 	double max, done;
@@ -2558,7 +2652,6 @@ int _usb_write(struct cgpu_info *cgpu, int ep, char *buf, size_t bufsiz, int *pr
 	}
 
 	usbdev = cgpu->usbdev;
-
 	if (timeout == DEVTIMEOUT)
 		timeout = usbdev->found->timeout;
 
@@ -2570,33 +2663,30 @@ int _usb_write(struct cgpu_info *cgpu, int ep, char *buf, size_t bufsiz, int *pr
 	while (bufsiz > 0) {
 		sent = 0;
 		if (usbdev->usecps) {
-			if (usbdev->last_write_tv.tv_sec && usbdev->last_write_siz) {
-				struct timeval now;
-				double need;
+			if (usbdev->last_write_siz) {
+				cgtimer_t now, already_done;
+				double sleep_estimate;
+				double write_time = (double)(usbdev->last_write_siz) /
+						    (double)(usbdev->cps);
 
-				cgtime(&now);
-				need = (double)(usbdev->last_write_siz) /
-					(double)(usbdev->cps) -
-					tdiff(&now, &(usbdev->last_write_tv));
+				cgtimer_time(&now);
+				cgtimer_sub(&now, &usbdev->cgt_last_write, &already_done);
+				sleep_estimate = write_time - cgtimer_to_ms(&already_done);
 
-				// Simple error condition check/avoidance '< 1.0'
-				if (need > 0.0 && need < 1.0) {
+				if (sleep_estimate > 0.0) {
+					cgsleep_ms_r(&usbdev->cgt_last_write, write_time * 1000.0);
 					cgpu->usbinfo.write_delay_count++;
-					cgpu->usbinfo.total_write_delay += need;
-					nmsleep((unsigned int)(need * 1000.0));
+					cgpu->usbinfo.total_write_delay += sleep_estimate;
 				}
 			}
-			cgtime(&(usbdev->last_write_tv));
+			cgsleep_prepare_r(&usbdev->cgt_last_write);
 			usbdev->last_write_siz = bufsiz;
 		}
-		STATS_TIMEVAL(&tv_start);
 		err = usb_bulk_transfer(usbdev->handle,
 					usbdev->found->eps[ep].ep,
 					(unsigned char *)buf, bufsiz, &sent,
-					timeout, cgpu, cmd);
+					timeout, cgpu, MODE_BULK_WRITE, cmd, first ? SEQ0 : SEQ1);
 		cgtime(&tv_finish);
-		USB_STATS(cgpu, &tv_start, &tv_finish, err,
-				MODE_BULK_WRITE, cmd, first ? SEQ0 : SEQ1);
 
 		USBDEBUG("USB debug: @_usb_write(%s (nodev=%s)) err=%d%s sent=%d", cgpu->drv->name, bool_str(cgpu->usbinfo.nodev), err, isnodev(err), sent);
 
@@ -2638,7 +2728,8 @@ int __usb_transfer(struct cgpu_info *cgpu, uint8_t request_type, uint8_t bReques
 #if DO_USB_STATS
 	struct timeval tv_start, tv_finish;
 #endif
-	uint32_t *buf = NULL;
+	unsigned char buf[64];
+	uint32_t *buf32 = (uint32_t *)buf;
 	int err, i, bufsiz;
 
 	USBDEBUG("USB debug: _usb_transfer(%s (nodev=%s),type=%"PRIu8",req=%"PRIu8",value=%"PRIu16",index=%"PRIu16",siz=%d,timeout=%u,cmd=%s)", cgpu->drv->name, bool_str(cgpu->usbinfo.nodev), request_type, bRequest, wValue, wIndex, siz, timeout, usb_cmdname(cmd));
@@ -2650,6 +2741,8 @@ int __usb_transfer(struct cgpu_info *cgpu, uint8_t request_type, uint8_t bReques
 		goto out_;
 	}
 	usbdev = cgpu->usbdev;
+	if (timeout == DEVTIMEOUT)
+		timeout = usbdev->found->timeout;
 
 	USBDEBUG("USB debug: @_usb_transfer() data=%s", bin2hex((unsigned char *)data, (size_t)siz));
 
@@ -2657,49 +2750,43 @@ int __usb_transfer(struct cgpu_info *cgpu, uint8_t request_type, uint8_t bReques
 		bufsiz = siz - 1;
 		bufsiz >>= 2;
 		bufsiz++;
-		buf = malloc(bufsiz << 2);
-		if (unlikely(!buf))
-			quit(1, "Failed to malloc in _usb_transfer");
 		for (i = 0; i < bufsiz; i++)
-			buf[i] = htole32(data[i]);
+			buf32[i] = htole32(data[i]);
 	}
 
-	USBDEBUG("USB debug: @_usb_transfer() buf=%s", bin2hex((unsigned char *)buf, (size_t)siz));
+	USBDEBUG("USB debug: @_usb_transfer() buf=%s", bin2hex(buf, (size_t)siz));
 
 	if (usbdev->usecps) {
-		if (usbdev->last_write_tv.tv_sec && usbdev->last_write_siz) {
-			struct timeval now;
-			double need;
+		if (usbdev->last_write_siz) {
+			cgtimer_t now, already_done;
+			double sleep_estimate;
+			double write_time = (double)(usbdev->last_write_siz) /
+					    (double)(usbdev->cps);
 
-			cgtime(&now);
-			need = (double)(usbdev->last_write_siz) /
-				(double)(usbdev->cps) -
-				tdiff(&now, &(usbdev->last_write_tv));
+			cgtimer_time(&now);
+			cgtimer_sub(&now, &usbdev->cgt_last_write, &already_done);
+			sleep_estimate = write_time - cgtimer_to_ms(&already_done);
 
-			// Simple error condition check/avoidance '< 1.0'
-			if (need > 0.0 && need < 1.0) {
+			if (sleep_estimate > 0.0) {
+				cgsleep_ms_r(&usbdev->cgt_last_write, write_time * 1000.0);
 				cgpu->usbinfo.write_delay_count++;
-				cgpu->usbinfo.total_write_delay += need;
-				nmsleep((unsigned int)(need * 1000.0));
+				cgpu->usbinfo.total_write_delay += sleep_estimate;
 			}
 		}
-		cgtime(&(usbdev->last_write_tv));
+		cgsleep_prepare_r(&usbdev->cgt_last_write);
 		usbdev->last_write_siz = siz;
 	}
 	STATS_TIMEVAL(&tv_start);
 	cg_rlock(&cgusb_fd_lock);
 	err = libusb_control_transfer(usbdev->handle, request_type,
-		bRequest, wValue, wIndex, (unsigned char *)buf, (uint16_t)siz,
-		timeout == DEVTIMEOUT ? usbdev->found->timeout : timeout);
+		bRequest, wValue, wIndex, buf, (uint16_t)siz, timeout);
 	cg_runlock(&cgusb_fd_lock);
 	STATS_TIMEVAL(&tv_finish);
-	USB_STATS(cgpu, &tv_start, &tv_finish, err, MODE_CTRL_WRITE, cmd, SEQ0);
+	USB_STATS(cgpu, &tv_start, &tv_finish, err, MODE_CTRL_WRITE, cmd, SEQ0, timeout);
 
 	USBDEBUG("USB debug: @_usb_transfer(%s (nodev=%s)) err=%d%s", cgpu->drv->name, bool_str(cgpu->usbinfo.nodev), err, isnodev(err));
 
 	IOERR_CHECK(cgpu, err);
-
-	free(buf);
 
 	if (NOCONTROLDEV(err))
 		release_cgpu(cgpu);
@@ -2727,6 +2814,7 @@ int _usb_transfer_read(struct cgpu_info *cgpu, uint8_t request_type, uint8_t bRe
 #if DO_USB_STATS
 	struct timeval tv_start, tv_finish;
 #endif
+	unsigned char tbuf[64];
 	int err, pstate;
 
 	DEVLOCK(cgpu, pstate);
@@ -2740,36 +2828,37 @@ int _usb_transfer_read(struct cgpu_info *cgpu, uint8_t request_type, uint8_t bRe
 		goto out_unlock;
 	}
 	usbdev = cgpu->usbdev;
+	if (timeout == DEVTIMEOUT)
+		timeout = usbdev->found->timeout;
 
 	*amount = 0;
 
-	if (usbdev->usecps) {
-		if (usbdev->last_write_tv.tv_sec && usbdev->last_write_siz) {
-			struct timeval now;
-			double need;
+	if (usbdev->usecps && usbdev->last_write_siz) {
+		cgtimer_t now, already_done;
+		double sleep_estimate;
+		double write_time = (double)(usbdev->last_write_siz) /
+				    (double)(usbdev->cps);
 
-			cgtime(&now);
-			need = (double)(usbdev->last_write_siz) /
-				(double)(usbdev->cps) -
-				tdiff(&now, &(usbdev->last_write_tv));
+		cgtimer_time(&now);
+		cgtimer_sub(&now, &usbdev->cgt_last_write, &already_done);
+		sleep_estimate = write_time - cgtimer_to_ms(&already_done);
 
-			// Simple error condition check/avoidance '< 1.0'
-			if (need > 0.0 && need < 1.0) {
-				cgpu->usbinfo.read_delay_count++;
-				cgpu->usbinfo.total_read_delay += need;
-				nmsleep((unsigned int)(need * 1000.0));
-			}
+		if (sleep_estimate > 0.0) {
+			cgsleep_ms_r(&usbdev->cgt_last_write, write_time * 1000.0);
+			cgpu->usbinfo.read_delay_count++;
+			cgpu->usbinfo.total_read_delay += sleep_estimate;
 		}
 	}
+	memset(tbuf, 0, 64);
 	STATS_TIMEVAL(&tv_start);
 	cg_rlock(&cgusb_fd_lock);
 	err = libusb_control_transfer(usbdev->handle, request_type,
 		bRequest, wValue, wIndex,
-		(unsigned char *)buf, (uint16_t)bufsiz,
-		timeout == DEVTIMEOUT ? usbdev->found->timeout : timeout);
+		tbuf, (uint16_t)bufsiz, timeout);
 	cg_runlock(&cgusb_fd_lock);
 	STATS_TIMEVAL(&tv_finish);
-	USB_STATS(cgpu, &tv_start, &tv_finish, err, MODE_CTRL_READ, cmd, SEQ0);
+	USB_STATS(cgpu, &tv_start, &tv_finish, err, MODE_CTRL_READ, cmd, SEQ0, timeout);
+	memcpy(buf, tbuf, bufsiz);
 
 	USBDEBUG("USB debug: @_usb_transfer_read(%s (nodev=%s)) amt/err=%d%s%s%s", cgpu->drv->name, bool_str(cgpu->usbinfo.nodev), err, isnodev(err), err > 0 ? " = " : BLANK, err > 0 ? bin2hex((unsigned char *)buf, (size_t)err) : BLANK);
 
@@ -3029,7 +3118,7 @@ void usb_cleanup()
 
 	hotplug_time = 0;
 
-	nmsleep(10);
+	cgsleep_ms(10);
 
 	count = 0;
 	for (i = 0; i < total_devices; i++) {
@@ -3059,7 +3148,7 @@ void usb_cleanup()
 
 		cgtime(&start);
 		while (42) {
-			nmsleep(50);
+			cgsleep_ms(50);
 
 			mutex_lock(&cgusbres_lock);
 
@@ -3308,7 +3397,7 @@ static bool resource_lock(const char *dname, uint8_t bus_number, uint8_t device_
 	if (is_in_use_bd(bus_number, device_address))
 		return false;
 
-	sprintf(name, "cg-usb-%d-%d", (int)bus_number, (int)device_address);
+	snprintf(name, sizeof(name), "cg-usb-%d-%d", (int)bus_number, (int)device_address);
 
 	sec = mksec(dname, bus_number, device_address);
 	if (!sec)
@@ -3384,7 +3473,7 @@ fail:
 	if (is_in_use_bd(bus_number, device_address))
 		return false;
 
-	sprintf(name, "/tmp/cgminer-usb-%d-%d", (int)bus_number, (int)device_address);
+	snprintf(name, sizeof(name), "/tmp/cgminer-usb-%d-%d", (int)bus_number, (int)device_address);
 	fd = open(name, O_CREAT|O_RDONLY, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
 	if (fd == -1) {
 		applog(LOG_ERR,
@@ -3438,7 +3527,7 @@ fail:
 			}
 			if (opt.buf->sem_otime != 0)
 				break;
-			nmsleep(1);
+			cgsleep_ms(1);
 		}
 	}
 
@@ -3484,7 +3573,7 @@ static void resource_unlock(const char *dname, uint8_t bus_number, uint8_t devic
 	HANDLE usbMutex = NULL;
 	char name[64];
 
-	sprintf(name, "cg-usb-%d-%d", (int)bus_number, (int)device_address);
+	snprintf(name, sizeof(name), "cg-usb-%d-%d", (int)bus_number, (int)device_address);
 
 	in_use_get_ress(bus_number, device_address, (void **)(&usbMutex), (void **)(&sec));
 
@@ -3509,7 +3598,7 @@ fila:
 	key_t *key = NULL;
 	int *sem = NULL;
 
-	sprintf(name, "/tmp/cgminer-usb-%d-%d", (int)bus_number, (int)device_address);
+	snprintf(name, sizeof(name), "/tmp/cgminer-usb-%d-%d", (int)bus_number, (int)device_address);
 
 	in_use_get_ress(bus_number, device_address, (void **)(&key), (void **)(&sem));
 

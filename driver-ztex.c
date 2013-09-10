@@ -162,8 +162,8 @@ static uint32_t ztex_checkNonce(struct work *work, uint32_t nonce)
 	for (i = 0; i < 76 / 4; i++)
 		swap32[i] = swab32(data32[i]);
 
-	sha2(swap, 80, hash1);
-	sha2(hash1, 32, hash2);
+	sha256(swap, 80, hash1);
+	sha256(hash1, 32, hash2);
 
 	return htonl(hash2_32[7]);
 }
@@ -194,7 +194,7 @@ static int64_t ztex_scanhash(struct thr_info *thr, struct work *work,
 	if (i < 0) {
 		// Something wrong happened in send
 		applog(LOG_ERR, "%s: Failed to send hash data with err %d, retrying", ztex->repr, i);
-		nmsleep(500);
+		cgsleep_ms(500);
 		i = libztex_sendHashData(ztex, sendbuf);
 		if (i < 0) {
 			// And there's nothing we can do about it
@@ -233,7 +233,7 @@ static int64_t ztex_scanhash(struct thr_info *thr, struct work *work,
 
 		int sleepcount = 0;
 		while (thr->work_restart == 0 && sleepcount < 25) {
-			nmsleep(10);
+			cgsleep_ms(10);
 			sleepcount += 1;
 		}
 
@@ -247,7 +247,7 @@ static int64_t ztex_scanhash(struct thr_info *thr, struct work *work,
 		if (i < 0) {
 			// Something wrong happened in read
 			applog(LOG_ERR, "%s: Failed to read hash data with err %d, retrying", ztex->repr, i);
-			nmsleep(500);
+			cgsleep_ms(500);
 			i = libztex_readHashData(ztex, &hdata[0]);
 			if (i < 0) {
 				// And there's nothing we can do about it
@@ -362,22 +362,18 @@ static int64_t ztex_scanhash(struct thr_info *thr, struct work *work,
 	return noncecnt;
 }
 
-static void ztex_statline_before(char *buf, struct cgpu_info *cgpu)
+static void ztex_statline_before(char *buf, size_t bufsiz, struct cgpu_info *cgpu)
 {
 	if (cgpu->deven == DEV_ENABLED) {
-		tailsprintf(buf, "%s-%d | ", cgpu->device_ztex->snString, cgpu->device_ztex->fpgaNum+1);
-		tailsprintf(buf, "%0.1fMHz | ", cgpu->device_ztex->freqM1 * (cgpu->device_ztex->freqM + 1));
+		tailsprintf(buf, bufsiz, "%s-%d | ", cgpu->device_ztex->snString, cgpu->device_ztex->fpgaNum+1);
+		tailsprintf(buf, bufsiz, "%0.1fMHz | ", cgpu->device_ztex->freqM1 * (cgpu->device_ztex->freqM + 1));
 	}
 }
 
 static bool ztex_prepare(struct thr_info *thr)
 {
-	struct timeval now;
 	struct cgpu_info *cgpu = thr->cgpu;
 	struct libztex_device *ztex = cgpu->device_ztex;
-
-	cgtime(&now);
-	get_datestamp(cgpu->init, &now);
 
 	ztex_selectFpga(ztex);
 	if (libztex_configureFpga(ztex) != 0) {
