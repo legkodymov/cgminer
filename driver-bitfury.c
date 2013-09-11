@@ -97,10 +97,6 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 			send_reinit(devices[i].slot, devices[i].fasync, devices[i].osc6_bits);
 		}
 	}
-	for(i=0; i < chip_n ; i++)
-	{
-		printf("%d %d\n",i,devices[i].osc6_bits);
-	}
 	first = 1;
 
 	for (chip = 0; chip < chip_n; chip++) {
