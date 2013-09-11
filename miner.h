@@ -918,7 +918,7 @@ extern bool opt_bfl_noncerange;
 #endif
 #ifdef USE_BITFURY
 extern int opt_bitfury_board_type;
-extern unsigned char opt_bitfury_chip_speed;
+extern char *opt_bitfury_options;
 #endif
 extern int swork_id;
 

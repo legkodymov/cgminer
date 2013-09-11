@@ -90,11 +90,16 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 
 	if (!first) {
 		for (i = 0; i < chip_n; i++) {
-			devices[i].osc6_bits = opt_bitfury_chip_speed;
+			devices[i].osc6_bits = 54;
 		}
+		set_chip_opts(devices, chip_n);
 		for (i = 0; i < chip_n; i++) {
 			send_reinit(devices[i].slot, devices[i].fasync, devices[i].osc6_bits);
 		}
+	}
+	for(i=0; i < chip_n ; i++)
+	{
+		printf("%d %d\n",i,devices[i].osc6_bits);
 	}
 	first = 1;
 
@@ -178,6 +183,44 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 	shift_number++;
 	cgsleep_ms(200);
 	return hashes;
+}
+
+void set_chip_opts(struct bitfury_device *devices, int chip_n)
+{
+	if (opt_bitfury_options == NULL)
+		return;
+	int chip, speed, i=0;
+	char *comma;
+	char *s = opt_bitfury_options;
+	if(sscanf(s,"ALL:%d",&speed))
+	{
+		for(i=0; i < chip_n ; i++)
+		{
+			devices[i].osc6_bits = speed;
+		}
+		comma = strchr(s,',');
+		if(comma != NULL)
+		{
+			s=comma+1;
+		} else
+		{
+			return;
+		}
+	}
+	
+	comma = strchr(s,',');
+	while (comma != NULL)
+	{
+		if(sscanf(s,"%d:%d",&chip,&speed) < 2)
+			return;
+		s=comma+1;
+		comma = strchr(s,',');
+		devices[chip].osc6_bits = speed;
+	}
+
+	if(sscanf(s,"%d:%d",&chip,&speed) < 2)
+		return;
+	devices[chip].osc6_bits = speed;
 }
 
 int submit_work(struct bitfury_work *w, struct thr_info *thr)
