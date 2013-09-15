@@ -551,27 +551,11 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 	
 	static int init_this_chip = 0;
 	struct bitfury_device *first_in_slot = bf;
-	
-	
-	static struct timeval now, spi_started;
-	
-	
-	
-	if(second_run)
-	{
-		cgtime(&now);
-		int wait=1000000*(now.tv_sec-spi_started.tv_sec)+now.tv_usec-spi_started.tv_usec;
-		if(wait<800000){
-			cgsleep_ms((800000-wait)/1000);
-		}
-	}
 
-	
-	
 	select_slot(bf->slot);
 	spi_clear_buf();
 	spi_emit_break();
-	cgtime(&spi_started);
+
 	for (chip_id = 0; chip_id < chip_n; chip_id++) {
 
 		struct bitfury_device *d = bf + chip_id;

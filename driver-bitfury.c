@@ -83,6 +83,8 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 	static first = 0; //TODO Move to detect()
 	int i;
 	static int shift_number = 1;
+	static struct timeval spi_started;
+	struct timeval now;
 	
 	devices = thr->cgpu->devices;
 	chip_n = thr->cgpu->chip_n;
@@ -95,8 +97,25 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 		for (i = 0; i < chip_n; i++) {
 			send_reinit(devices[i].slot, devices[i].fasync, devices[i].osc6_bits);
 		}
+		cgtime(&spi_started);
 	}
 	first = 1;
+
+	cgtime(&now);
+	int wait=1000000*(now.tv_sec-spi_started.tv_sec)+now.tv_usec-spi_started.tv_usec;
+	if(wait<800000){
+		//cgsleep_ms((800000-wait)/1000);
+		if(restart_wait(thr, (800000-wait)/1000) != ETIMEDOUT)
+		{
+			//purge work
+			for (;chip < chip_n; chip++)
+			{
+				devices[chip].bfwork.work = NULL;
+				devices[chip].bfwork.results_n = 0;
+				devices[chip].bfwork.results_sent = 0;
+			}
+		}
+	}	
 
 	for (chip = 0; chip < chip_n; chip++) {
 		devices[chip].job_switched = 0;
@@ -108,7 +127,7 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 			work_to_payload(&(devices[chip].bfwork.payload), devices[chip].bfwork.work);
 		}
 	}
-
+	cgtime(&spi_started);
 	libbitfury_sendHashData(devices, chip_n);
 	
 
@@ -176,10 +195,7 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 
 	
 	shift_number++;
-	
 
-	
-	//cgsleep_ms(400);
 	return hashes;
 }
 
