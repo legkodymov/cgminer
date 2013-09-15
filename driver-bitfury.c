@@ -82,7 +82,6 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 	
 	static first = 0; //TODO Move to detect()
 	int i;
-	
 	static int shift_number = 1;
 	
 	devices = thr->cgpu->devices;
@@ -109,7 +108,7 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 			work_to_payload(&(devices[chip].bfwork.payload), devices[chip].bfwork.work);
 		}
 	}
-	
+
 	libbitfury_sendHashData(devices, chip_n);
 	
 
@@ -177,7 +176,10 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 
 	
 	shift_number++;
-	cgsleep_ms(200);
+	
+
+	
+	//cgsleep_ms(400);
 	return hashes;
 }
 

@@ -67,6 +67,7 @@ struct bitfury_device {
 	unsigned fasync;
 	unsigned nonces_found;
 	unsigned nonce_errors;
+	int chip_buf_offset;
 };
 
 int libbitfury_readHashData(unsigned int *res);

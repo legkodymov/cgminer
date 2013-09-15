@@ -550,37 +550,38 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 	static unsigned second_run;
 	
 	static int init_this_chip = 0;
+	struct bitfury_device *first_in_slot = bf;
+	
+	
+	static struct timeval now, spi_started;
+	
+	
+	
+	if(second_run)
+	{
+		cgtime(&now);
+		int wait=1000000*(now.tv_sec-spi_started.tv_sec)+now.tv_usec-spi_started.tv_usec;
+		if(wait<800000){
+			cgsleep_ms((800000-wait)/1000);
+		}
+	}
 
+	
+	
+	select_slot(bf->slot);
+	spi_clear_buf();
+	spi_emit_break();
+	cgtime(&spi_started);
 	for (chip_id = 0; chip_id < chip_n; chip_id++) {
-		unsigned char *hexstr;
+
 		struct bitfury_device *d = bf + chip_id;
 		struct bitfury_payload *p = &(d->bfwork.payload);
-		unsigned *newbuf = d->newbuf;
-		unsigned *oldbuf = d->oldbuf;
-
-		struct timespec d_time;
-		struct timespec time;
-
-		int chip = d->fasync;
-		int slot = d->slot;
 
 		memcpy(atrvec, p, 20*4);
 		ms3_compute(atrvec);
 
 
 		/* Programming next value */
-		spi_clear_buf();
-		int newslot = select_slot(slot);
-		if (newslot||chip_id == 0)
-		{
-			
-		} 
-		
-
-		
-		
-		spi_emit_break();
-		spi_emit_fasync(chip);
 		
 		if(init_this_chip == chip_id)
 		{
@@ -588,19 +589,36 @@ int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 			send_conf();
 			send_init();
 		}
-		
+		d->chip_buf_offset = spi_getbufsz()+3;
 		spi_emit_data(0x3000, (void*)&atrvec[0], 19*4);
-
-		spi_txrx(spi_gettxbuf(), spi_getrxbuf(), spi_getbufsz());
-		memcpy(newbuf, spi_getrxbuf()+4 + chip, 17*4);
-		//spi_emit_fasync(1);
-		deselect_slot(slot);
-
-		d->job_switched = newbuf[16] != oldbuf[16];
-
-
+		spi_emit_fasync(1);
+		
+		
+		struct bitfury_device *next_d = d + 1;
+		if(next_d == NULL || next_d->slot != d->slot)
+		{
 			
+			struct bitfury_device *d2;
+			spi_txrx(spi_gettxbuf(), spi_getrxbuf(), spi_getbufsz());
+			for (d2  = first_in_slot; d2 != next_d ; d2 = d2+1)
+			{
+				memcpy(d2->newbuf, spi_getrxbuf()+d2->chip_buf_offset, 17*4);
+				d2->job_switched = d2->newbuf[16] != d2->oldbuf[16];
+			}
+			deselect_slot(d->slot);
+			if(next_d != NULL)
+			{
+				first_in_slot = next_d;
+				select_slot(next_d->slot);
+			}
+			
+			
+			spi_clear_buf();
+			spi_emit_break();
+		}
 	}
+	
+	
 	
 	for (chip_id = 0; chip_id < chip_n; chip_id++) {
 		struct bitfury_device *d = bf + chip_id;
