@@ -85,7 +85,7 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 	static int shift_number = 1;
 	static struct timeval spi_started;
 	struct timeval now;
-	
+	struct cgpu_info *cgpu = thr->cgpu;
 	devices = thr->cgpu->devices;
 	chip_n = thr->cgpu->chip_n;
 
@@ -110,6 +110,11 @@ static int64_t bitfury_scanHash(struct thr_info *thr)
 			//purge work
 			for (;chip < chip_n; chip++)
 			{
+				if(devices[chip].bfwork.work != NULL)
+				{
+					work_completed(thr->cgpu, devices[chip].bfwork.work);
+				}
+				
 				devices[chip].bfwork.work = NULL;
 				devices[chip].bfwork.results_n = 0;
 				devices[chip].bfwork.results_sent = 0;
