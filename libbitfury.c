@@ -285,6 +285,11 @@ int detect_chip(int chip_n) {
 	memset(newbuf, 0, 17 * 4);
 	memset(oldbuf, 0, 17 * 4);
 
+	ms3_compute(&atrvec[0]);
+	ms3_compute(&atrvec[20]);
+	ms3_compute(&atrvec[40]);
+	spi_init();
+
 
 	spi_clear_buf();
 	spi_emit_break(); /* First we want to break chain! Otherwise we'll get all of traffic bounced to output */
@@ -332,7 +337,7 @@ int detect_chip(int chip_n) {
 int libbitfury_detectChips(struct bitfury_device *devices) {
 	int n = 0;
 	int i;
-	static slot_on[BITFURY_MAXBANKS];
+	static slot_on[32];
 	struct timespec t1, t2;
 
 	if (tm_i2c_init() < 0) {
@@ -340,25 +345,19 @@ int libbitfury_detectChips(struct bitfury_device *devices) {
 		return(1);
 	}
 
-	ms3_compute(&atrvec[0]);
-	ms3_compute(&atrvec[20]);
-	ms3_compute(&atrvec[40]);
-	spi_init();
-
-	for (i = 0; i < BITFURY_MAXBANKS; i++) {
+	for (i = 0; i < 32; i++) {
 		slot_on[i] = 0;
 	}
-
 	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t1);
-	for (i = 0; i < BITFURY_MAXBANKS; i++) {
+	for (i = 0; i < 32; i++) {
 		int slot_detected = tm_i2c_detect(i) != -1;
 		slot_on[i] = slot_detected;
 		tm_i2c_clear_oe(i);
 		nmsleep(1);
 	}
 
-	for (i = 0; i < BITFURY_MAXBANKS; i++) {
-//		if (slot_on[i]) {
+	for (i = 0; i < 32; i++) {
+		if (slot_on[i]) {
 			int chip_n = 0;
 			int chip_detected;
 			tm_i2c_set_oe(i);
@@ -373,7 +372,7 @@ int libbitfury_detectChips(struct bitfury_device *devices) {
 				}
 			} while (chip_detected);
 			tm_i2c_clear_oe(i);
-//		}
+		}
 	}
 
 	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t2);
@@ -443,8 +442,8 @@ int rehash(unsigned char *midstate, unsigned m7,
 	sha2(out, 32, out);
 
 	if (out32[7] == 0) {
-		hex = bin2hex(midstate, 32);
-		hex = bin2hex(out, 32);
+		// hex = bin2hex(midstate, 32);
+		// hex = bin2hex(out, 32);
 //		applog(LOG_INFO, "! MS0: %08x, m7: %08x, ntime: %08x, nbits: %08x, nnonce: %08x\n\t\t\t out: %s\n", mid32[0], m7, ntime, nbits, nnonce, hex);
 //		history[history_p] = nnonce;
 //		history_p++; history_p &= 512 - 1;
@@ -465,7 +464,7 @@ void work_to_payload(struct bitfury_payload *p, struct work *w) {
 	p->nbits = bswap_32(*(unsigned *)(flipped_data + 72));
 }
 
-int libbitfury_sendHashData(struct thr_info *thr, struct bitfury_device *bf, int chip_n) {
+int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
 	int chip_id;
 	int buf_diff;
 	static unsigned second_run;
@@ -501,10 +500,6 @@ int libbitfury_sendHashData(struct thr_info *thr, struct bitfury_device *bf, int
 			d->otimer1 = d->timer1;
 			d->timer1 = time;
 			d->ocounter1 = d->counter1;
-			if (d->osc6_bits != d->osc6_req) {
-                          send_freq(d->slot, d->fasync, d->osc6_req);
-                          d->osc6_bits = d->osc6_req;
-                        }
 			/* Programming next value */
 			tm_i2c_set_oe(slot);
 			spi_clear_buf(); spi_emit_break();
@@ -556,25 +551,34 @@ int libbitfury_sendHashData(struct thr_info *thr, struct bitfury_device *bf, int
 					if ((newbuf[i] & 0xFF) == 0xE0)
 						continue;
 					pn = decnonce(newbuf[i]);
-					if(rehash(op->midstate, op->m7, op->ntime, op->nbits, pn)) s = pn;
-					else if(rehash(op->midstate, op->m7, op->ntime, op->nbits, pn-0x00400000)) s = pn - 0x00400000;
-					else if(rehash(op->midstate, op->m7, op->ntime, op->nbits, pn-0x00800000)) s = pn - 0x00800000;
-					else if(rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x02800000)) s = pn + 0x02800000;
-					else if(rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x02C00000)) s = pn + 0x02C00000;
-					else if(rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x00400000)) s = pn + 0x00400000;
+					s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn) ? pn : 0;
+					s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn-0x00400000) ? pn - 0x00400000 : 0;
+					s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn-0x00800000) ? pn - 0x00800000 : 0;
+					s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x02800000) ? pn + 0x02800000 : 0;
+					s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x02C00000) ? pn + 0x02C00000 : 0;
+					s |= rehash(op->midstate, op->m7, op->ntime, op->nbits, pn+0x00400000) ? pn + 0x00400000 : 0;
 					if (s) {
-						results[results_num++] = bswap_32(s);
-						found++;
+						int k;
+						int dup = 0;
+						for (k = 0; k < results_num; k++) {
+							if (results[k] == bswap_32(s)) {
+								dup = 1;
+							}
+						}
+						if (!dup) {
+							results[results_num++] = bswap_32(s);
+							found++;
+						}
 					}
 
 					s = 0;
 					pn = decnonce(newbuf[i]);
-					if(rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn)) s = pn;
-					else if(rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn-0x00400000)) s = pn - 0x00400000;
-					else if(rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn-0x00800000)) s = pn - 0x00800000;
-					else if(rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x02800000)) s = pn + 0x02800000;
-					else if(rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x02C00000)) s = pn + 0x02C00000;
-					else if(rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x00400000)) s = pn + 0x00400000;
+					s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn) ? pn : 0;
+					s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn-0x400000) ? pn - 0x400000 : 0;
+					s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn-0x800000) ? pn - 0x800000 : 0;
+					s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x2800000)? pn + 0x2800000 : 0;
+					s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x2C00000)? pn + 0x2C00000 : 0;
+					s |= rehash(o2p->midstate, o2p->m7, o2p->ntime, o2p->nbits, pn+0x400000) ? pn + 0x400000 : 0;
 					if (s) {
 						d->old_nonce = bswap_32(s);
 						found++;
@@ -582,20 +586,19 @@ int libbitfury_sendHashData(struct thr_info *thr, struct bitfury_device *bf, int
 
 					s = 0;
 					pn = decnonce(newbuf[i]);
-					if(rehash(p->midstate, p->m7, p->ntime, p->nbits, pn)) s = pn;
-					else if(rehash(p->midstate, p->m7, p->ntime, p->nbits, pn-0x00400000)) s = pn - 0x00400000;
-					else if(rehash(p->midstate, p->m7, p->ntime, p->nbits, pn-0x00800000)) s = pn - 0x00800000;
-					else if(rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x02800000)) s = pn + 0x02800000;
-					else if(rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x02C00000)) s = pn + 0x02C00000;
-					else if(rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x00400000)) s = pn + 0x00400000;
+					s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn) ? pn : 0;
+					s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn-0x400000) ? pn - 0x400000 : 0;
+					s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn-0x800000) ? pn - 0x800000 : 0;
+					s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x2800000)? pn + 0x2800000 : 0;
+					s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x2C00000)? pn + 0x2C00000 : 0;
+					s |= rehash(p->midstate, p->m7, p->ntime, p->nbits, pn+0x400000) ? pn + 0x400000 : 0;
 					if (s) {
 						d->future_nonce = bswap_32(s);
 						found++;
 					}
 					if (!found) {
 						//printf("AAA Strange: %08x, chip_id: %d\n", pn, chip_id);
-						d->hw_errors++;
-						inc_hw_errors(thr);
+						d->strange_counter++;
 					}
 				}
 			}
