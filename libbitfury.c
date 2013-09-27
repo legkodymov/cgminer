@@ -464,7 +464,7 @@ void work_to_payload(struct bitfury_payload *p, struct work *w) {
 	p->nbits = bswap_32(*(unsigned *)(flipped_data + 72));
 }
 
-int libbitfury_sendHashData(struct bitfury_device *bf, int chip_n) {
+int libbitfury_sendHashData(struct thr_info *thr, struct bitfury_device *bf, int chip_n) {
 	int chip_id;
 	int buf_diff;
 	static unsigned second_run;

@@ -44,7 +44,7 @@ static int fd;
 void spi_init(void)
 {
 	int mem_fd;
-	int mode = 0, bits = 8, speed = 500000;
+	int mode = 0, bits = 8, speed = 4000000;
 
 	if(system("modprobe i2c-dev")) {
 		perror("FATAL, modprobe i2c-dev failed (must be root)");
@@ -155,8 +155,10 @@ int spi_txrx(const char *wrbuf, char *rdbuf, int bufsz)
 	struct spi_ioc_transfer tr[16];
 
 	memset(&tr,0,sizeof(tr));
+	mode = 0; bits = 8; speed = 4000000;
 
 	spi_reset(2048);
+
 
 	rv = 0;
 	while (bufsz >= 4096) {
