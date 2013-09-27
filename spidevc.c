@@ -36,16 +36,79 @@
 #include <linux/i2c-dev.h>
 #include <sys/stat.h>
 
+#include "bitfury-config.h"
+
 static volatile unsigned *gpio;
+static int fd;
 
 void spi_init(void)
 {
-	int fd;
-	fd = open("/dev/mem",O_RDWR|O_SYNC);
-	if (fd < 0) { perror("/dev/mem trouble"); exit(1); }
-	gpio = mmap(0,4096,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0x20200000);
-	if (gpio == MAP_FAILED) { perror("gpio mmap trouble"); exit(1); }
-	close(fd);
+	int mem_fd;
+	int mode = 0, bits = 8, speed = 500000;
+
+	if(system("modprobe i2c-dev")) {
+		perror("FATAL, modprobe i2c-dev failed (must be root)");
+		exit(1);
+	}
+	if(system("modprobe i2c-bcm2708")) {
+		perror("FATAL, modprobe i2c-bcm2708 failed (must be root)");
+		exit(1);
+	}
+	if(system("modprobe spidev")) {
+		perror("FATAL, modprobe spidev failed (must be root)");
+		exit(1);
+	}
+	if(system("modprobe spi-bcm2708")) {
+		perror("FATAL, modprobe spi-bcm2708 failed (must be root)");
+		exit(1);
+	}
+	mem_fd = open("/dev/mem",O_RDWR|O_SYNC);
+	if (mem_fd < 0) {
+		perror("FATAL, /dev/mem trouble (must be roor)");
+		exit(1);
+	}
+	gpio = mmap(0,4096,PROT_READ|PROT_WRITE,MAP_SHARED,mem_fd,0x20200000);
+	if (gpio == MAP_FAILED) {
+		perror("FATAL, gpio mmap trouble (must be root)");
+		close(mem_fd);
+		exit(1);
+	}
+
+	fd = open("/dev/spidev0.0", O_RDWR);
+	if (fd < 0) {
+		perror("Unable to open SPI device");
+		exit(1);
+	}
+	if (ioctl(fd, SPI_IOC_WR_MODE, &mode) < 0) {
+		perror("Unable to set WR MODE");
+		close(fd);
+		exit(1);
+	}
+        if (ioctl(fd, SPI_IOC_RD_MODE, &mode) < 0) {
+		perror("Unable to set RD MODE");
+		close(fd);
+		exit(1);
+	}
+        if (ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits) < 0) {
+		perror("Unable to set WR_BITS_PER_WORD");
+		close(fd);
+		exit(1); 
+	}
+        if (ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &bits) < 0) {
+		perror("Unable to set RD_BITS_PER_WORD");
+		close(fd);
+		exit(1);
+	}
+        if (ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed) < 0) {
+		perror("Unable to set WR_MAX_SPEED_HZ");
+		close(fd);
+		exit(1);
+	}
+        if (ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed) < 0) {
+		perror("Unable to set RD_MAX_SPEED_HZ");
+		close(fd);
+		exit(1);
+	}
 }
 
 #define INP_GPIO(g) *(gpio+((g)/10)) &= ~(7<<(((g)%10)*3))
@@ -87,23 +150,13 @@ int spi_reset(int a)
 
 int spi_txrx(const char *wrbuf, char *rdbuf, int bufsz)
 {
-	int fd;
 	int mode, bits, speed, rv, i, j;
 	struct timespec tv;
 	struct spi_ioc_transfer tr[16];
 
 	memset(&tr,0,sizeof(tr));
-	mode = 0; bits = 8; speed = 4000000;
 
-	spi_reset(1234);
-	fd = open("/dev/spidev0.0", O_RDWR);
-	if (fd < 0) { perror("Unable to open SPI device"); exit(1); }
-        if (ioctl(fd, SPI_IOC_WR_MODE, &mode) < 0) { perror("Unable to set WR MODE"); close(fd); return -1; }
-        if (ioctl(fd, SPI_IOC_RD_MODE, &mode) < 0) { perror("Unable to set RD MODE"); close(fd); return -1; }
-        if (ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits) < 0) { perror("Unable to set WR_BITS_PER_WORD"); close(fd); return -1; }
-        if (ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &bits) < 0) { perror("Unable to set RD_BITS_PER_WORD"); close(fd); return -1; }
-        if (ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed) < 0) { perror("Unable to set WR_MAX_SPEED_HZ"); close(fd); return -1; }
-        if (ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed) < 0) { perror("Unable to set RD_MAX_SPEED_HZ"); close(fd); return -1; }
+	spi_reset(2048);
 
 	rv = 0;
 	while (bufsz >= 4096) {
@@ -129,11 +182,15 @@ int spi_txrx(const char *wrbuf, char *rdbuf, int bufsz)
         i = rv;
         for (j = 0; j < i; j++) {
                 rv = (int)ioctl(fd, SPI_IOC_MESSAGE(1), (intptr_t)&tr[j]);
-                if (rv < 0) { perror("WTF!"); close(fd); return -1; }
+                if (rv < 0) {
+			perror("WTF! Unable to SPI_IOC_MESSAGE");
+			return -1; 
+		}
         }
 
-	close(fd);
-	spi_reset(4321);
+#ifdef BITFURY_METABANK
+	spi_reset(4096);
+#endif
 
 	return 0;
 }

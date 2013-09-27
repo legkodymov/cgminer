@@ -148,6 +148,9 @@ bool opt_worktime;
 #ifdef USE_AVALON
 char *opt_avalon_options = NULL;
 #endif
+#ifdef USE_BITFURY
+char *opt_bitfury_clockbits = NULL;
+#endif
 #ifdef USE_USBUTILS
 char *opt_usb_select = NULL;
 int opt_usbdump = -1;
@@ -901,6 +904,15 @@ static char *set_avalon_options(const char *arg)
 }
 #endif
 
+#ifdef USE_BITFURY
+static char *set_bitfury_clockbits(const char *arg)
+{
+	opt_set_charp(arg, &opt_bitfury_clockbits);
+
+	return NULL;
+}
+#endif
+
 #ifdef USE_USBUTILS
 static char *set_usb_select(const char *arg)
 {
@@ -1075,6 +1087,11 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_ARG("--avalon-temp",
 		     set_int_0_to_100, opt_show_intval, &opt_avalon_temp,
 		     "Set avalon target temperature"),
+#endif
+#ifdef USE_BITFURY
+	OPT_WITH_ARG("--bitfury-clockbits",
+		     set_bitfury_clockbits, NULL, NULL,
+		     "Set bitfury clockbits options chip:bits,chip:bits,..."),
 #endif
 	OPT_WITHOUT_ARG("--load-balance",
 		     set_loadbalance, &pool_strategy,

@@ -28,7 +28,7 @@
 #include "miner.h"
 #include "util.h"
 
-#if defined(USE_BFLSC) || defined(USE_AVALON)
+#if defined(USE_BFLSC) || defined(USE_AVALON) || defined(USE_BITFURY)
 #define HAVE_AN_ASIC 1
 #endif
 
@@ -44,7 +44,7 @@
 #define SOCKBUFSIZ	65432
 
 // BUFSIZ varies on Windows and Linux
-#define TMPBUFSIZ	8192
+#define TMPBUFSIZ	16384
 
 // Number of requests to queue - normally would be small
 // However lots of PGA's may mean more
@@ -185,6 +185,9 @@ static const char *DEVICECODE = ""
 #endif
 #ifdef USE_MODMINER
 			"MMQ "
+#endif
+#ifdef USE_BITFURY
+			"BITFURY "
 #endif
 			"";
 
@@ -412,6 +415,12 @@ static const char *JSON_PARAMETER = "parameter";
 #define MSG_ASCNOID 114
 #endif
 #define MSG_ASCUSBNODEV 115
+#ifdef USE_BITFURY
+#define MSG_OSCBITSRANGE 116
+#define MSG_CHIPRANGE 117
+#define MSG_SETOSCBITS 118
+#define MSG_SETOSCBITS_NOPAR 119
+#endif
 
 enum code_severity {
 	SEVERITY_ERR,
@@ -608,6 +617,12 @@ struct CODES {
  { SEVERITY_ERR,   MSG_ASCUNW,	PARAM_ASC,	"ASC %d is not flagged WELL, cannot enable" },
  { SEVERITY_SUCC,  MSG_ASCIDENT,PARAM_ASC,	"Identify command sent to ASC%d" },
  { SEVERITY_WARN,  MSG_ASCNOID,	PARAM_ASC,	"ASC%d does not support identify" },
+#endif
+#ifdef USE_BITFURY
+ { SEVERITY_ERR,   MSG_OSCBITSRANGE, PARAM_NONE,  "Clock-bit range error (must be in range 52-56)" },
+ { SEVERITY_ERR,   MSG_OSCBITSRANGE, PARAM_INT,   "Chip index range error (%d chips max)" },
+ { SEVERITY_SUCC,  MSG_SETOSCBITS, PARAM_INT,     "Clock-bit set to %d" },
+ { SEVERITY_ERR,   MSG_SETOSCBITS_NOPAR, PARAM_NONE,   "Parameter required (<slot>,<chip>,<bits>)" },
 #endif
  { SEVERITY_FAIL, 0, 0, NULL }
 };
@@ -1193,6 +1208,10 @@ static int numascs()
 		if (devices[i]->drv->drv_id == DRIVER_BFLSC)
 			count++;
 #endif
+#ifdef USE_BITFURY
+		if (devices[i]->drv->drv_id == DRIVER_BITFURY)
+			count++;
+#endif
 	}
 	rd_unlock(&devices_lock);
 	return count;
@@ -1211,6 +1230,10 @@ static int ascdevice(int ascid)
 #endif
 #ifdef USE_BFLSC
 		if (devices[i]->drv->drv_id == DRIVER_BFLSC)
+			count++;
+#endif
+#ifdef USE_BITFURY
+		if (devices[i]->drv->drv_id == DRIVER_BITFURY)
 			count++;
 #endif
 		if (count == (ascid + 1))
@@ -3651,6 +3674,69 @@ static void asccount(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __may
 		io_close(io_data);
 }
 
+#ifdef USE_BITFURY
+static void set_clock_bits(struct io_data *io_data, __maybe_unused SOCKETTYPE c, char *param, bool isjson, __maybe_unused char group) //++++++++++++++++++++++++++++
+{
+	struct cgpu_info *cgpu;
+	static struct bitfury_device *devices;
+	int value;
+	int slot_idx;
+	int chip_idx;
+	int osc_bits;
+	char *to = NULL;
+	char *tc = NULL;
+	int i = 0;
+
+	if(param == NULL) {
+		message(io_data, MSG_SETOSCBITS_NOPAR, 0, NULL, isjson);
+		return;
+	}
+
+	while (param[i] != '\0') {
+		i++;
+		if (param[i] != ',') continue;
+		tc = param+i+1;
+		param[i] = 0;
+		int k = 0;
+		while (tc[k] != '\0') {
+			k++;
+			if (tc[k] != ',') continue;
+			to = tc+k+1;
+			tc[k] = '\0';
+			break;
+		}
+		break;
+	}
+	if (!tc || !to)
+		return;
+	slot_idx = atoi(param);
+	chip_idx = atoi(tc);
+	osc_bits = atoi(to);
+	if (osc_bits < 52 || osc_bits > 56) {
+		message(io_data, MSG_OSCBITSRANGE, 0, NULL, isjson);
+		return;
+	}
+	cgpu = get_devices(0);
+	devices = cgpu->devices;
+	int index = -1;
+	i = 0;
+	for (; i < cgpu->chip_n; i++) {
+		if ( (devices[i].slot == slot_idx) && (devices[i].fasync == chip_idx) ) {
+			index = i;
+			break;
+		}
+	}
+	if (index < 0 || index >= cgpu->chip_n) {
+		message(io_data, MSG_CHIPRANGE, (int) cgpu->chip_n, NULL, isjson);
+		return;
+	}
+	value = (unsigned int)devices[index].osc6_bits;
+	devices[index].osc6_req = osc_bits;
+
+	message(io_data, MSG_SETOSCBITS, osc_bits, NULL, isjson);
+}
+#endif
+
 static void checkcommand(struct io_data *io_data, __maybe_unused SOCKETTYPE c, char *param, bool isjson, char group);
 
 struct CMDS {
@@ -3715,6 +3801,9 @@ struct CMDS {
 	{ "ascidentify",	ascidentify,	true },
 #endif
 	{ "asccount",		asccount,	false },
+#ifdef USE_BITFURY
+        { "setclkb",            set_clock_bits, false },
+#endif
 	{ NULL,			NULL,		false }
 };
 

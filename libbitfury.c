@@ -442,8 +442,8 @@ int rehash(unsigned char *midstate, unsigned m7,
 	sha2(out, 32, out);
 
 	if (out32[7] == 0) {
-		hex = bin2hex(midstate, 32);
-		hex = bin2hex(out, 32);
+		// hex = bin2hex(midstate, 32);
+		// hex = bin2hex(out, 32);
 //		applog(LOG_INFO, "! MS0: %08x, m7: %08x, ntime: %08x, nbits: %08x, nnonce: %08x\n\t\t\t out: %s\n", mid32[0], m7, ntime, nbits, nnonce, hex);
 //		history[history_p] = nnonce;
 //		history_p++; history_p &= 512 - 1;

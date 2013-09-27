@@ -477,7 +477,7 @@ struct cgpu_info {
 #endif /* USE_BITFORCE || USE_BFLSC */
 #ifdef USE_BITFURY
 	int chip_n;
-	struct bitfury_device devices[200]; // TODO Move somewhere to appropriate place
+	struct bitfury_device devices[BITFURY_MAXCHIPS]; // TODO Move somewhere to appropriate place
 #endif
 	enum dev_enable deven;
 	int accepted;
@@ -871,6 +871,9 @@ extern char *opt_icarus_timing;
 extern bool opt_worktime;
 #ifdef USE_AVALON
 extern char *opt_avalon_options;
+#endif
+#ifdef USE_BITFURY
+extern char *opt_bitfury_clockbits;
 #endif
 #ifdef USE_USBUTILS
 extern char *opt_usb_select;

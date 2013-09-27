@@ -4,6 +4,8 @@
 #include <linux/i2c-dev.h>
 #include "tm_i2c.h"
 
+#include "bitfury-config.h"
+
 float tm_i2c_Data2Temp(unsigned int ans) {
 	float t = ans;
 	return (t / 1023.0 * 3.3 * 2-2.73) * 100.0;
@@ -70,37 +72,65 @@ unsigned int tm_i2c_req(int fd, unsigned char addr, unsigned char cmd, unsigned 
 }
 
 int tm_i2c_detect(unsigned char slot) {
+#ifdef BITFURY_METABANK
 	if (slot < 0 || slot > 31) return 0;
 	return tm_i2c_req(tm_i2c_fd, (TM_ADDR >> 1) + slot, TM_GET_CORE0, 0);
+#else
+	return 0;
+#endif
 }
 
 float tm_i2c_getcore0(unsigned char slot) {
+#ifdef BITFURY_METABANK
 	if (slot < 0 || slot > 31) return 0;
 	return tm_i2c_Data2Core(tm_i2c_req(tm_i2c_fd, (TM_ADDR >> 1) + slot, TM_GET_CORE0, 0));
+#else
+	return 0;
+#endif
 }
 
 float tm_i2c_getcore1(unsigned char slot) {
+#ifdef BITFURY_METABANK
 	if (slot < 0 || slot > 31) return 0;
 	return tm_i2c_Data2Core(tm_i2c_req(tm_i2c_fd, (TM_ADDR >> 1) + slot, TM_GET_CORE1, 0));
+#else
+	return 0;
+#endif
 }
 
 float tm_i2c_gettemp(unsigned char slot) {
+#ifdef BITFURY_METABANK
 	if (slot < 0 || slot > 31) return 0;
 	return tm_i2c_Data2Temp(tm_i2c_req(tm_i2c_fd, (TM_ADDR >> 1) + slot, TM_GET_TEMP, 0));
+#else
+	return 0;
+#endif
 }
 
 void tm_i2c_set_oe(unsigned char slot) {
+#ifdef BITFURY_METABANK
 	if (slot < 0 || slot > 31) return;
 	tm_i2c_req(tm_i2c_fd, (TM_ADDR >> 1) + slot, TM_SET_OE, 0);
+#else
+	return;
+#endif
 }
 
 void tm_i2c_clear_oe(unsigned char slot) {
+#ifdef BITFURY_METABANK
 	if (slot < 0 || slot > 31) return;
 	tm_i2c_req(tm_i2c_fd, (TM_ADDR >> 1) + slot, TM_SET_OE, 1);
+#else
+	return;
+#endif
 }
 
 unsigned char tm_i2c_slot2addr(unsigned char slot) {
+#ifdef BITFURY_METABANK
 	if (slot < 0 || slot > 31) return 0;
 	return ((TM_ADDR >> 1) + slot);
+#else
+	return 0;
+#endif
 }
 
