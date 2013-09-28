@@ -41,10 +41,11 @@
 static volatile unsigned *gpio;
 static int fd;
 
+static int mode = 0, bits = 8, speed = 4000000;
+
 void spi_init(void)
 {
 	int mem_fd;
-	int mode = 0, bits = 8, speed = 4000000;
 
 	if(system("modprobe i2c-dev")) {
 		perror("FATAL, modprobe i2c-dev failed (must be root)");
@@ -150,12 +151,11 @@ int spi_reset(int a)
 
 int spi_txrx(const char *wrbuf, char *rdbuf, int bufsz)
 {
-	int mode, bits, speed, rv, i, j;
+	int rv, i, j;
 	struct timespec tv;
 	struct spi_ioc_transfer tr[16];
 
 	memset(&tr,0,sizeof(tr));
-	mode = 0; bits = 8; speed = 4000000;
 
 	spi_reset(2048);
 
