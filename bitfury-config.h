@@ -28,15 +28,29 @@
 
 /* Select your type of hardware */
 
-#define BITFURY_METABANK 1
-// #define BITFURY_NEEDBMW_NOMUX 1
+//#define BITFURY_METABANK 1
+#define BITFURY_NEEDBMW_NOMUX 1
 
+/* Set clock defaults */
+#define CLK_NO_DIV2 0
+
+#if CLK_NO_DIV2
+#define CLK_BITS_MIN 20
+#define CLK_BITS_MAX 48
+#define CLK_BITS_DEF 44
+#define CLK_BITS_INIT 40
+#else
+#define CLK_BITS_MIN 48
+#define CLK_BITS_MAX 57
+#define CLK_BITS_DEF 54
+#define CLK_BITS_INIT 52
+#endif
 
 /* Set stats options */
 
-//#define BITFURY_ENABLE_SHORT_STAT 1
-//#define BITFURY_ENABLE_LONG_STAT 1
-#define BITFURY_API_STATS 300
+#define BITFURY_SHORT_STATS 30
+#define BITFURY_LONG_STATS 300
+#define BITFURY_API_STATS 600
 #define BITFURY_STAT_N 1024
 
 #endif
