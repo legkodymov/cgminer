@@ -35,10 +35,10 @@
 #define CLK_NO_DIV2 0
 
 #if CLK_NO_DIV2
-#define CLK_BITS_MIN 20
+#define CLK_BITS_MIN 30
 #define CLK_BITS_MAX 48
-#define CLK_BITS_DEF 44
-#define CLK_BITS_INIT 40
+#define CLK_BITS_DEF 40
+#define CLK_BITS_INIT 38
 #else
 #define CLK_BITS_MIN 48
 #define CLK_BITS_MAX 57
