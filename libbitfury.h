@@ -99,6 +99,7 @@ struct bitfury_device {
 	unsigned int nonces[32];
 	int current_nonce;
 	double gh_stat[8];
+	int strange_counter;
 };
 
 int libbitfury_readHashData(unsigned int *res);
