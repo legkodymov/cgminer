@@ -28,8 +28,8 @@
 
 /* Select your type of hardware */
 
-//#define BITFURY_METABANK 1
-#define BITFURY_NEEDBMW_NOMUX 1
+#define BITFURY_METABANK 1
+//#define BITFURY_NEEDBMW_NOMUX 1
 
 /* Set clock defaults */
 #define CLK_NO_DIV2 0

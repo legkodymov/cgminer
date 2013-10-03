@@ -599,7 +599,6 @@ int libbitfury_sendHashData(struct thr_info *thr, struct bitfury_device *bf, int
 								found++;
 							}
 							if (!found) {
-								applog(LOG_WARNING, "	nonce %08x bad HW chip %d", pn, chip_id);
 								//printf("AAA Strange: %08x, chip_id: %d\n", pn, chip_id);
 								d->hw_errors++;
 								inc_hw_errors(thr);
