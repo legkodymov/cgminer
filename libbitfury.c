@@ -534,7 +534,11 @@ int libbitfury_sendHashData(struct thr_info *thr, struct bitfury_device *bf, int
 
 			tm_i2c_clear_oe(slot);
 
-			d->job_switched = newbuf[16] != oldbuf[16];
+			if ( 0 == newbuf[16] || 0 == !newbuf[16] )
+             		  d->job_switched = ( newbuf[16] != oldbuf[16]  );
+        		else
+            		  applog(LOG_WARNING, "Unexpected value in newbuf[16] == 0x%08x", newbuf[16]);
+
 
 			int i;
 			int results_num = 0;
