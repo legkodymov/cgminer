@@ -32,6 +32,7 @@ typedef struct {
 
 int tm_i2c_init();
 void tm_i2c_close();
+unsigned int tm_i2c_req_slot(unsigned char slot, unsigned char cmd, unsigned int data);
 unsigned int tm_i2c_req(int fd, unsigned char addr, unsigned char cmd, unsigned int data);
 float tm_i2c_Data2Temp(unsigned int ans);
 float tm_i2c_Data2Core(unsigned int ans);

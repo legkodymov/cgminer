@@ -27,6 +27,10 @@ void tm_i2c_close() {
 	close(tm_i2c_fd);
 }
 
+unsigned int tm_i2c_req_slot(unsigned char slot, unsigned char cmd, unsigned int data) {
+	return(tm_i2c_req(tm_i2c_fd, ((TM_ADDR >> 1) + slot), cmd, data));
+}
+
 unsigned int tm_i2c_req(int fd, unsigned char addr, unsigned char cmd, unsigned int data) {
 	int i;
 	unsigned char buf[16];

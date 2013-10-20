@@ -360,18 +360,27 @@ int libbitfury_detectChips(struct bitfury_device *devices) {
 		if (slot_on[i]) {
 			int chip_n = 0;
 			int chip_detected;
+			int retries;
+			tm_i2c_req_slot(i, TM_SET_PORTD, 0x6060 | tm_i2c_req_slot(i, TM_GET_PORTD, 0));
 			tm_i2c_set_oe(i);
 			do {
 				chip_detected = detect_chip(chip_n);
-				if (chip_detected) {
-					applog(LOG_WARNING, "BITFURY slot: %d, chip #%d detected", i, n);
-					devices[n].slot = i;
-					devices[n].fasync = chip_n;
-					n++;
-					chip_n++;
-				}
+				retries = 3;
+				do {
+					if (chip_detected) {
+						applog(LOG_WARNING, "BITFURY slot: %d, chip #%d detected", i, n);
+						devices[n].slot = i;
+						devices[n].fasync = chip_n;
+						n++;
+						chip_n++;
+					}
+					retries--;
+				} while (retries && (!chip_detected));
 			} while (chip_detected);
 			tm_i2c_clear_oe(i);
+			if (chip_n < 8) {
+				tm_i2c_req_slot(i, TM_SET_PORTD, 0x9F9F & tm_i2c_req_slot(i, TM_GET_PORTD, 0));
+			}
 		}
 	}
 
